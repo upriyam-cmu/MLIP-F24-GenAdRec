@@ -20,11 +20,13 @@ class AdBatch(NamedTuple):
     cate_id: torch.Tensor
     campaign_id: torch.Tensor
     brand: torch.Tensor
+    q_proba: torch.Tensor
 
 
 class InteractionsBatch(NamedTuple):
     user_feats: UserBatch
     ad_feats: AdBatch
+    train_index: AdBatch
     timestamp: torch.Tensor
     is_click: torch.Tensor
 
@@ -75,8 +77,10 @@ class RawInteractionsDataset(Dataset):
 
 
 class InteractionsDataset(Dataset):
-    def __init__(self, raw_interactions_dataset: RawInteractionsDataset, shuffle: bool = True, is_train: bool = True):
+    def __init__(self, raw_interactions_dataset: RawInteractionsDataset, shuffle: bool = True, is_train: bool = True, train_index_size: int = 2048):
+        super().__init__()
         idx = 0 if is_train else 1
+        self.train_index_size = train_index_size
         self.user_profile = pd.read_csv("data/user_profile.csv").rename({"userid": "user"}, axis="columns")
         self.ad_feature = pd.read_csv("data/ad_feature.csv")
         self.data = raw_interactions_dataset.get_train_test_split()[idx].merge(
@@ -84,6 +88,7 @@ class InteractionsDataset(Dataset):
         ).merge(
             self.user_profile, on="user", how="left"
         )
+        self.data = self.with_ads_occ_proba(self.data)
 
         if shuffle:
             self.data = self.data.iloc[np.random.permutation(np.arange(len(self.data)))].reset_index().drop(columns="index")
@@ -92,11 +97,27 @@ class InteractionsDataset(Dataset):
     def categorical_features(self):
         feat_names = AdBatch._fields
         max_values = self.data.max()
-        return [CategoricalFeature(feat_name, int(max_values[feat_name])+1) for feat_name in feat_names]
+        return [
+            CategoricalFeature(feat_name, int(max_values[feat_name])+1) for feat_name in feat_names 
+            if feat_name not in ("adgroup_id", "q_proba")
+        ]
 
     @cached_property
     def n_users(self):
         return int(self.data.max()["user"]+1)
+    
+    def with_ads_occ_proba(self, data):
+        cnt = data.groupby("adgroup_id")["clk"].count().reset_index().rename({"clk": "q_proba"}, axis="columns")
+        cnt["q_proba"] = cnt["q_proba"] / len(self)
+        return data.merge(
+            cnt,
+            on="adgroup_id"
+        )
+    
+    def get_index(self, index_size):
+        sample_feats = self.data[list(AdBatch._fields)].sample(index_size, replace=True)
+        index = AdBatch(*torch.tensor(sample_feats.fillna(0).to_numpy().astype(np.int32).T).split(1, dim=0))
+        return index
     
     def __getitem__(self, index) -> InteractionsBatch:
         data = self.data.iloc[index]
@@ -110,11 +131,14 @@ class InteractionsDataset(Dataset):
         clk = [data["clk"]] if not isinstance(data["clk"], pd.Series) else data["clk"].to_numpy()
         clk = torch.tensor(clk).to(torch.int32)
         
+        train_index = self.get_index(self.train_index_size)
+
         return InteractionsBatch(
             user_feats=user_batch,
             ad_feats=ad_batch,
+            train_index=train_index,
             timestamp=timestamp,
-            is_click=clk
+            is_click=clk,
         )
     
     def __len__(self):

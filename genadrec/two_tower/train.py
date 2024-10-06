@@ -9,6 +9,7 @@ from dataset.interactions import AdBatch
 from dataset.interactions import InteractionsDataset
 from dataset.interactions import RawInteractionsDataset
 
+
 class Trainer:
     def __init__(self,
                  train_epochs: int = 10,

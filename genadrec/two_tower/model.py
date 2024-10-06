@@ -52,7 +52,8 @@ class AdEmbedder(nn.Module):
     def forward(self, batch: AdBatch):
         x = []
         for feat, id in batch._asdict().items():
-            x.append(self.embedding_modules[feat](id))
+            if feat in self.embedding_modules.keys():
+                x.append(self.embedding_modules[feat](id))
         return torch.cat(x, axis=-1)
 
 
