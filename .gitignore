@@ -3,5 +3,8 @@ data/
 *.egg-info/
 zips/
 template/
+.DS_Store
+.venv
+venv
 
 __pycache__
