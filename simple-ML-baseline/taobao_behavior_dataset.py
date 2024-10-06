@@ -48,6 +48,7 @@ class TaobaoUserClicksDataset(Dataset):
         self.user_encoder = OrdinalEncoder(dtype=np.int64).fit(click_data.select(self.user_feats))
         self.ad_encoder = OrdinalEncoder(dtype=np.int64).fit(click_data.select(self.ad_feats))
         
+        self.input_dims = [user.shape[0] for user in self.user_encoder.categories_]
         self.output_dims = [category.shape[0] for category in self.ad_encoder.categories_]
         
         self.ad_encoder.set_output(transform="polars")
@@ -84,9 +85,6 @@ class TaobaoUserClicksDataset(Dataset):
         self.timestamps = user_clicks[:, -2].astype(int)
         self.clicks = user_clicks[:, -1].astype(int)
         
-    def get_output_dims(self):
-        return self.output_dims
-        
     def __len__(self):
         return len(self.clicks)
 
@@ -99,5 +97,5 @@ class TaobaoUserClicksDataset(Dataset):
                 ad_data = ad_data[1:]
             for j, mask in enumerate(ads_masks):
                 mask[i, self.conditional_mappings[j][tuple(ad_data[:j+1])]] = 0
-        return user_data, ads_data, timestamps, clicks, ads_masks
+        return user_data, ads_data, ads_masks,timestamps, clicks
  
