@@ -18,12 +18,13 @@ class L2NormalizationLayer(nn.Module):
 
 
 class UserTower(nn.Module):
-    def __init__(self, n_users, embedding_dim):
+    def __init__(self, n_users, embedding_dim, device):
         super().__init__()
         self.id_embedding = nn.Sequential(
-            nn.Embedding(n_users, embedding_dim),
+            nn.Embedding(n_users, embedding_dim, device=device),
             L2NormalizationLayer(dim=-1)
         )
+        self.device = device
     
     def forward(self, batch: UserBatch):
         return self.id_embedding(batch.user.to(self.device))
@@ -32,16 +33,18 @@ class UserTower(nn.Module):
 class AdEmbedder(nn.Module):
     def __init__(self,
                  categorical_features: Iterable[CategoricalFeature],
-                 embedding_dim: int
+                 embedding_dim: int,
+                 device: torch.device
             ) -> None:
         super().__init__()
 
         self.embedding_modules = nn.ModuleDict({
-            feat.name: nn.Embedding(feat.num_classes, embedding_dim) 
+            feat.name: nn.Embedding(feat.num_classes, embedding_dim, device=device) 
             for feat in categorical_features
         })
         
         self.embedding_dim = embedding_dim
+        self.device = device
     
     @property
     def out_dim(self):
@@ -56,9 +59,10 @@ class AdEmbedder(nn.Module):
 
 
 class AdTower(nn.Module):
-    def __init__(self, categorical_features: Iterable[CategoricalFeature], embedding_dim, hidden_dims):
+    def __init__(self, categorical_features: Iterable[CategoricalFeature], embedding_dim, hidden_dims, device):
         super().__init__()
-        self.ad_embedder = AdEmbedder(categorical_features, embedding_dim)
+        self.device = device
+        self.ad_embedder = AdEmbedder(categorical_features, embedding_dim, device=device)
         self.mlp = self.build_mlp(self.ad_embedder.out_dim, hidden_dims, embedding_dim)
     
     def build_mlp(self, in_dim, hidden_dims, out_dim):
@@ -73,7 +77,7 @@ class AdTower(nn.Module):
         
         mlp.append(nn.Linear(hidden_dims[-1], out_dim))
         mlp.append(L2NormalizationLayer(dim=-1))
-        return mlp
+        return mlp.to(self.device)
 
     def forward(self, batch):
         emb = self.ad_embedder(batch)
@@ -82,12 +86,13 @@ class AdTower(nn.Module):
 
 
 class TwoTowerModel(nn.Module):
-    def __init__(self, ads_categorical_features, ads_hidden_dims, n_users, embedding_dim):
+    def __init__(self, ads_categorical_features, ads_hidden_dims, n_users, embedding_dim, device):
         super().__init__()
 
-        self.ad_tower = AdTower(categorical_features=ads_categorical_features, embedding_dim=embedding_dim, hidden_dims=ads_hidden_dims)
-        self.user_tower = UserTower(n_users=n_users, embedding_dim=embedding_dim)
+        self.ad_tower = AdTower(categorical_features=ads_categorical_features, embedding_dim=embedding_dim, hidden_dims=ads_hidden_dims, device=device)
+        self.user_tower = UserTower(n_users=n_users, embedding_dim=embedding_dim, device=device)
         self.sampled_softmax = SampledSoftmaxLoss()
+        self.device = device
     
     def forward(self, batch):
         ad_embedding = self.ad_tower(batch.ad_feats).squeeze(0)
