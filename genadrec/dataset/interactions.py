@@ -32,7 +32,7 @@ class InteractionsBatch(NamedTuple):
 class RawInteractionsDataset(Dataset):
     def __init__(self):
         super().__init__()
-        self.raw_sample = pd.read_csv("../data/raw_sample.csv").drop(columns=["pid", "nonclk"])
+        self.raw_sample = pd.read_csv("data/raw_sample.csv").drop(columns=["pid", "nonclk"])
 
         self.data = self._dedup_interactions()
         self.train_df, self.test_df = self._train_test_split(self.data)
@@ -69,13 +69,16 @@ class RawInteractionsDataset(Dataset):
 
     def __getitem__(self, index):
         return self.data.iloc[index]
+    
+    def __len__(self):
+        return len(self.data)
 
 
 class InteractionsDataset(Dataset):
     def __init__(self, raw_interactions_dataset: RawInteractionsDataset, shuffle: bool = True, is_train: bool = True):
         idx = 0 if is_train else 1
-        self.user_profile = pd.read_csv("../data/user_profile.csv").rename({"userid": "user"}, axis="columns")
-        self.ad_feature = pd.read_csv("../data/ad_feature.csv")
+        self.user_profile = pd.read_csv("data/user_profile.csv").rename({"userid": "user"}, axis="columns")
+        self.ad_feature = pd.read_csv("data/ad_feature.csv")
         self.data = raw_interactions_dataset.get_train_test_split()[idx].merge(
             self.ad_feature, on="adgroup_id", how="left"
         ).merge(
@@ -89,21 +92,23 @@ class InteractionsDataset(Dataset):
     def categorical_features(self):
         feat_names = AdBatch._fields
         max_values = self.data.max()
-        return [CategoricalFeature(feat_name, max_values[feat_name]) for feat_name in feat_names]
+        return [CategoricalFeature(feat_name, int(max_values[feat_name])+1) for feat_name in feat_names]
 
     @cached_property
     def n_users(self):
-        return self.data.max()["user"]
+        return int(self.data.max()["user"]+1)
     
     def __getitem__(self, index) -> InteractionsBatch:
         data = self.data.iloc[index]
 
         user_feats = data[list(UserBatch._fields)]
         ad_feats = data[list(AdBatch._fields)]
-        user_batch = UserBatch(*torch.tensor(user_feats.to_numpy()).split(1, dim=-1))
-        ad_batch = AdBatch(*torch.tensor(ad_feats.to_numpy()).split(1, dim=-1))
-        timestamp = torch.tensor(data["time_stamp"].to_numpy()).unsqueeze(1)
-        clk = torch.tensor(data["clk"].to_numpy()).unsqueeze(1)
+        user_batch = UserBatch(*torch.tensor(user_feats.to_numpy().astype(np.int32).T).split(1, dim=0))
+        ad_batch = AdBatch(*torch.tensor(ad_feats.fillna(0).to_numpy().astype(np.int32).T).split(1, dim=0))
+        timestamp = [data["time_stamp"]] if not isinstance(data["time_stamp"], pd.Series) else data["time_stamp"].to_numpy()
+        timestamp = torch.tensor(timestamp).to(torch.int32)
+        clk = [data["clk"]] if not isinstance(data["clk"], pd.Series) else data["clk"].to_numpy()
+        clk = torch.tensor(clk).to(torch.int32)
         
         return InteractionsBatch(
             user_feats=user_batch,
@@ -111,3 +116,6 @@ class InteractionsDataset(Dataset):
             timestamp=timestamp,
             is_click=clk
         )
+    
+    def __len__(self):
+        return len(self.data)

@@ -1,12 +1,12 @@
 import torch
 from torch import nn
-from torch import functional as F
+from torch.nn import functional as F
 from typing import NamedTuple
 from typing import Iterable
-from ..dataset.interactions import AdBatch
-from ..dataset.interactions import CategoricalFeature
-from ..dataset.interactions import InteractionsBatch
-from ..dataset.interactions import UserBatch
+from dataset.interactions import AdBatch
+from dataset.interactions import CategoricalFeature
+from dataset.interactions import InteractionsBatch
+from dataset.interactions import UserBatch
 
 
 class L2NormalizationLayer(nn.Module):
@@ -47,7 +47,7 @@ class AdEmbedder(nn.Module):
     
     @property
     def out_dim(self):
-        self.embedding_dim*len(self.embedding_modules)
+        return self.embedding_dim*len(self.embedding_modules)
 
     def forward(self, batch: AdBatch):
         x = []
@@ -69,11 +69,11 @@ class AdTower(nn.Module):
         )
 
         for in_d, out_d in zip(hidden_dims[:-1], hidden_dims[1:]):
-            mlp.add(nn.Linear(in_d, out_d))
-            mlp.add(nn.SiLU())
+            mlp.append(nn.Linear(in_d, out_d))
+            mlp.append(nn.SiLU())
         
-        mlp.add(nn.Linear(hidden_dims[-1], out_dim))
-        mlp.add(L2NormalizationLayer(dim=-1))
+        mlp.append(nn.Linear(hidden_dims[-1], out_dim))
+        mlp.append(L2NormalizationLayer(dim=-1))
         return mlp
 
     def forward(self, batch):
@@ -84,13 +84,13 @@ class AdTower(nn.Module):
 
 class TwoTowerModel(nn.Module):
     def __init__(self, ads_categorical_features, ads_hidden_dims, n_users, embedding_dim):
-        super().__init__(self)
+        super().__init__()
 
         self.ad_tower = AdTower(categorical_features=ads_categorical_features, embedding_dim=embedding_dim, hidden_dims=ads_hidden_dims)
         self.user_tower = UserTower(n_users=n_users, embedding_dim=embedding_dim)
     
     def forward(self, batch):
-        ad_embedding = self.ad_tower(batch.user_feats)
-        user_embedding = self.user_tower(batch.ad_feats)
+        ad_embedding = self.ad_tower(batch.ad_feats).squeeze(0)
+        user_embedding = self.user_tower(batch.user_feats).squeeze(0)
         import pdb; pdb.set_trace()
 
