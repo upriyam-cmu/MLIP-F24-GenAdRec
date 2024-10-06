@@ -80,6 +80,7 @@ class InteractionsDataset(Dataset):
     def __init__(self, raw_interactions_dataset: RawInteractionsDataset, shuffle: bool = True, is_train: bool = True, train_index_size: int = 2048):
         super().__init__()
         idx = 0 if is_train else 1
+        self.is_train = is_train
         self.train_index_size = train_index_size
         self.user_profile = pd.read_csv("data/user_profile.csv").rename({"userid": "user"}, axis="columns")
         self.ad_feature = pd.read_csv("data/ad_feature.csv")
@@ -96,7 +97,7 @@ class InteractionsDataset(Dataset):
     @cached_property
     def categorical_features(self):
         feat_names = AdBatch._fields
-        max_values = self.data.max()
+        max_values = self.ad_feature.max()
         return [
             CategoricalFeature(feat_name, int(max_values[feat_name])+1) for feat_name in feat_names 
             if feat_name not in ("adgroup_id", "q_proba")
@@ -114,8 +115,12 @@ class InteractionsDataset(Dataset):
             on="adgroup_id"
         )
     
-    def get_index(self, index_size):
-        sample_feats = self.data[list(AdBatch._fields)].sample(index_size, replace=True)
+    def get_index(self, train_index_size: int = 1):
+        if not self.is_train:
+            self.ad_feature["q_proba"] = 0
+            sample_feats = self.ad_feature[list(AdBatch._fields)]
+        else:
+            sample_feats = self.data[list(AdBatch._fields)].sample(train_index_size, replace=True)
         index = AdBatch(*torch.tensor(sample_feats.fillna(0).to_numpy().astype(np.int32).T).split(1, dim=0))
         return index
     
@@ -125,7 +130,7 @@ class InteractionsDataset(Dataset):
         user_feats = data[list(UserBatch._fields)]
         ad_feats = data[list(AdBatch._fields)]
         user_batch = UserBatch(*torch.tensor(user_feats.to_numpy().astype(np.int32).T).split(1, dim=0))
-        ad_batch = AdBatch(*torch.tensor(ad_feats.fillna(0).to_numpy().astype(np.int32).T).split(1, dim=0))
+        ad_batch = AdBatch(*torch.tensor(ad_feats.fillna(0).to_numpy().T).split(1, dim=0))
         timestamp = [data["time_stamp"]] if not isinstance(data["time_stamp"], pd.Series) else data["time_stamp"].to_numpy()
         timestamp = torch.tensor(timestamp).to(torch.int32)
         clk = [data["clk"]] if not isinstance(data["clk"], pd.Series) else data["clk"].to_numpy()

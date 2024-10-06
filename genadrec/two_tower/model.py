@@ -1,12 +1,10 @@
 import torch
-from torch import nn
-from torch.nn import functional as F
-from typing import NamedTuple
-from typing import Iterable
 from dataset.interactions import AdBatch
 from dataset.interactions import CategoricalFeature
-from dataset.interactions import InteractionsBatch
 from dataset.interactions import UserBatch
+from torch import nn
+from two_tower.loss import SampledSoftmaxLoss
+from typing import Iterable
 
 
 class L2NormalizationLayer(nn.Module):
@@ -16,7 +14,7 @@ class L2NormalizationLayer(nn.Module):
         self.eps = eps
 
     def forward(self, x):
-        return F.normalize(x, p=2, dim=self.dim, eps=self.eps)
+        return nn.functional.normalize(x, p=2, dim=self.dim, eps=self.eps)
 
 
 class UserTower(nn.Module):
@@ -28,7 +26,7 @@ class UserTower(nn.Module):
         )
     
     def forward(self, batch: UserBatch):
-        return self.id_embedding(batch.user)
+        return self.id_embedding(batch.user.to(self.device))
     
 
 class AdEmbedder(nn.Module):
@@ -53,7 +51,7 @@ class AdEmbedder(nn.Module):
         x = []
         for feat, id in batch._asdict().items():
             if feat in self.embedding_modules.keys():
-                x.append(self.embedding_modules[feat](id))
+                x.append(self.embedding_modules[feat](id.to(torch.int32).to(self.device)))
         return torch.cat(x, axis=-1)
 
 
@@ -89,9 +87,26 @@ class TwoTowerModel(nn.Module):
 
         self.ad_tower = AdTower(categorical_features=ads_categorical_features, embedding_dim=embedding_dim, hidden_dims=ads_hidden_dims)
         self.user_tower = UserTower(n_users=n_users, embedding_dim=embedding_dim)
+        self.sampled_softmax = SampledSoftmaxLoss()
     
     def forward(self, batch):
         ad_embedding = self.ad_tower(batch.ad_feats).squeeze(0)
         user_embedding = self.user_tower(batch.user_feats).squeeze(0)
-        import pdb; pdb.set_trace()
 
+        # In-batch softmax. Maybe TODO: Use random index
+        batch_loss = self.sampled_softmax.forward(
+            user_embedding,
+            ad_embedding,
+            batch.ad_feats.adgroup_id,
+            batch.ad_feats.q_proba.flatten()
+        )
+
+        return batch_loss
+
+    def user_forward(self, batch):
+        user_embedding = self.user_tower(batch).squeeze(0)
+        return user_embedding
+    
+    def ad_forward(self, batch):
+        ad_embedding = self.ad_tower(batch).squeeze(0)
+        return ad_embedding
