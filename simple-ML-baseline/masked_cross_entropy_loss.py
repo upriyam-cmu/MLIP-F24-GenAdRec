@@ -9,7 +9,8 @@ class MaskedCrossEntropyLoss(nn.Module):
         self, 
         logits: List[torch.Tensor], 
         logit_masks: List[Optional[torch.Tensor]],
-        targets: torch.Tensor, 
+        targets: torch.Tensor,
+        penalize_masked: bool = True,
     ):
         assert len(logits) == len(logit_masks), "logits and logit_masks must have same length"
         assert len(logits) == targets.shape[1], "as many logits as target columns must be provided"
@@ -21,8 +22,9 @@ class MaskedCrossEntropyLoss(nn.Module):
             else:
                 assert logit.shape == logit_mask.shape, "logit and logit_mask must have same shape"
 
-                mask_loss = torch.sum(logit.exp() * logit_mask, dim=1)
-                loss += mask_loss.mean()
+                if penalize_masked:
+                    mask_loss = torch.sum(logit.exp() * logit_mask, dim=1)
+                    loss += mask_loss.mean()
 
                 categorical_loss = F.cross_entropy(logit.masked_fill(logit_mask, float('-inf')), targets[:, i])
                 loss += categorical_loss

@@ -15,7 +15,7 @@ print("Using device:", device)
 # %%
 batch_size = 32
 learning_rate = 0.001
-train_epochs = 1000
+train_epochs = 2
 eval_every_n = 10
 
 # %%
@@ -59,10 +59,15 @@ def gen_ads_mask(ads_data, dataset, device):
     return [None] + ads_masks
 
 # %%
+train_loss_per_epoch = []
+epoch_train_loss_curve = []
+test_loss_per_epoch = []
+
 best_val_loss = float('inf')
 for epoch in range(train_epochs):
     model.train()
     with tqdm(train_dataloader, desc=f'Epoch {epoch+1}') as pbar:
+        train_losses = []
         for user_data, ads_features, _, _ in pbar:
             user_data = user_data.to(device)
             ads_features = ads_features.to(device)
@@ -76,13 +81,17 @@ for epoch in range(train_epochs):
             )
             loss.backward()
             optimizer.step()
-            pbar.set_postfix({'Loss': loss.item()})
+            train_losses.append(loss.item())
+            pbar.set_postfix({'Loss': np.mean(train_losses)})
+        train_loss_per_epoch.append(np.mean(train_losses))
+        epoch_train_loss_curve.append(train_losses)
 
     if epoch % eval_every_n == 0:
         model.eval()
         with torch.no_grad():
             total_loss = 0
             with tqdm(test_dataloader) as pbar:
+                batches = 0
                 for user_data, ads_features, _, _ in pbar:
                     user_data = user_data.to(device)
                     ads_features = ads_features.to(device)
@@ -90,12 +99,15 @@ for epoch in range(train_epochs):
                     loss = loss_fn(
                         logits = ad_feature_logits,
                         logit_masks = gen_ads_mask(ads_features, train_dataset, device),
-                        targets = ads_features
+                        targets = ads_features,
+                        penalize_masked = False
                     )
-                    pbar.set_postfix({'Loss': loss.item()})
                     total_loss += loss.item()
+                    batches += 1
+                    pbar.set_postfix({'Loss': total_loss / batches})
 
             val_loss = total_loss / len(test_dataloader)
+            test_loss_per_epoch.append(val_loss)
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 torch.save({
@@ -111,3 +123,8 @@ for epoch in range(train_epochs):
                     'optimizer_state_dict': optimizer.state_dict(),
                     'loss': val_loss,
                 }, f'models/epoch_{epoch}.pth')
+
+# %%
+np.save('outputs/train_loss_per_epoch.npy', train_loss_per_epoch)
+np.save('outputs/test_loss_per_epoch.npy', test_loss_per_epoch)
+np.save('outputs/loss_curves.npy', epoch_train_loss_curve)
