@@ -60,9 +60,14 @@ class RawInteractionsDataset(Dataset):
         clk_per_user = clicks.groupby(by="user")["clk"].count()
         max_clk_per_user = clk_per_user.max()
 
-        click_cnt = clicks.sort_values(by=["user", "time_stamp"]).groupby("user")["clk"].rolling(max_clk_per_user, min_periods=1).sum()
+        click_cnt = (
+            clicks.sort_values(["time_stamp"], ascending=True)
+              .groupby("user")
+              .cumcount() + 1
+        )
+
+        clicks["clk_cnt"] = click_cnt
         clicks = clicks.reset_index().drop(columns="index")
-        clicks["clk_cnt"] = click_cnt.reset_index()["clk"]
         clicks = clicks.merge(clk_per_user.reset_index().rename({"clk":"clk_per_user"}, axis="columns"), on="user")
         split_timestamp = clicks[(clicks["clk_cnt"] == clicks["clk_per_user"]) & (clicks["clk_per_user"] > 1)][["user", "time_stamp"]]
 
@@ -92,13 +97,15 @@ class InteractionsDataset(Dataset):
         self.train_index_size = train_index_size
         self.user_profile = pd.read_csv("data/user_profile.csv").rename({"userid": "user"}, axis="columns")
         self.ad_feature = pd.read_csv("data/ad_feature.csv")
-        self.data = raw_interactions_dataset.get_train_test_split()[idx].merge(
+        
+        train_test_split = raw_interactions_dataset.get_train_test_split()
+        self.data = train_test_split[idx].merge(
             self.ad_feature, on="adgroup_id", how="left"
         ).merge(
             self.user_profile, on="user", how="left"
         )
 
-        all_data = pd.concat(raw_interactions_dataset.get_train_test_split()).merge(
+        self.train_data = train_test_split[0].merge(
             self.ad_feature, on="adgroup_id", how="left"
         ).merge(
             self.user_profile, on="user", how="left"
@@ -106,26 +113,29 @@ class InteractionsDataset(Dataset):
 
         self.data = self.with_ads_occ_proba(self.data)
 
-        self.data = self.encode_categories(all_data, self.data)
+        self.data = self.encode_categories(self.train_data, self.data)
 
         if shuffle:
             self.data = self.data.iloc[np.random.permutation(np.arange(len(self.data)))].reset_index().drop(columns="index")
 
     def encode_categories(self, train, target):
-        ordinal_encoder = OrdinalEncoder(dtype=np.int32)
+        user_encoder = OrdinalEncoder(dtype=np.int32)
         ad_feats = [feat for feat in AdBatch._fields if feat != "q_proba"]
-        ordinal_encoder.fit(train[list(UserBatch._fields)])
-        target[list(UserBatch._fields)] = ordinal_encoder.transform(target[list(UserBatch._fields)])
-        ordinal_encoder.fit(train[ad_feats].fillna(-1))
-        target[ad_feats] = ordinal_encoder.transform(target[ad_feats].fillna(-1))
+        for feat in ad_feats:
+            ad_encoder = OrdinalEncoder(dtype=np.int32, handle_unknown='use_encoded_value', unknown_value=len(train[feat].unique())+1)
+            ad_encoder.fit(train[feat].fillna(-1).to_numpy().reshape(-1, 1))
+            target[feat] = ad_encoder.transform(target[feat].fillna(-1).to_numpy().reshape(-1, 1))
+            self.ad_feature[feat] = ad_encoder.transform(self.ad_feature[feat].fillna(-1).to_numpy().reshape(-1, 1))
+        user_encoder.fit(train[list(UserBatch._fields)])
+        target = target[target["user"].isin(train["user"].unique())]
+        target[list(UserBatch._fields)] = user_encoder.transform(target[list(UserBatch._fields)])
         return target
 
     @cached_property
     def categorical_features(self):
         feat_names = AdBatch._fields
-        max_values = self.data.max()
         return [
-            CategoricalFeature(feat_name, int(max_values[feat_name])+1) for feat_name in feat_names 
+            CategoricalFeature(feat_name, len(self.train_data[feat_name].unique())+2) for feat_name in feat_names 
             if feat_name not in ("adgroup_id", "q_proba")
         ]
 

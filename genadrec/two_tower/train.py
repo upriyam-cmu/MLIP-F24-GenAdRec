@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from dataset.interactions import InteractionsDataset
 from dataset.interactions import RawInteractionsDataset
@@ -52,9 +53,11 @@ class Trainer:
         optimizer = AdamW(self.model.dense_grad_parameters(), lr=self.learning_rate)
         sparse_optimizer = SparseAdam(self.model.sparse_grad_parameters(), lr=self.learning_rate)
 
+        self.eval()
 
         for epoch in range(self.train_epochs):
             self.model.train()
+            training_losses = []
             with tqdm(train_dataloader, desc=f'Epoch {epoch+1}') as pbar:
                 for batch in pbar:
                     model_loss = self.model(batch)
@@ -66,7 +69,8 @@ class Trainer:
                     end = time.time()
                     #print(f"Backward time: {end - start}")
                     
-                    pbar.set_postfix({'Loss': model_loss.item()})
+                    training_losses.append(model_loss.item())
+                    pbar.set_postfix({'Loss': np.mean(training_losses[-100:])})
             
             if epoch % self.train_eval_every_n == 0:
                 self.eval()
@@ -80,11 +84,12 @@ class Trainer:
 
         self.model.eval()
         metrics = None
-        for batch in eval_dataloader:
-            user_emb, target_emb = self.model.user_forward(batch.user_feats), self.model.ad_forward(batch.ad_feats)
-            index_emb = self.model.ad_forward(eval_index)
-            
-            metrics = accumulate_metrics(user_emb, target_emb, index_emb, ks=[1,5,10,50,100,200], metrics=metrics)
+        with tqdm(eval_dataloader, desc=f'Eval') as pbar:
+            for batch in pbar:
+                user_emb, target_emb = self.model.user_forward(batch.user_feats), self.model.ad_forward(batch.ad_feats)
+                index_emb = self.model.ad_forward(eval_index)
+                
+                metrics = accumulate_metrics(user_emb, target_emb, index_emb, ks=[1,5,10,50,100,200], metrics=metrics)
         
         metrics = {k: (v/len(self.eval_dataset)) for k, v in metrics.items()}
         print(metrics)
