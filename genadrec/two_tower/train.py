@@ -6,19 +6,23 @@ from torch.utils.data import DataLoader
 from torch.utils.data import RandomSampler
 from two_tower.model import TwoTowerModel
 from torch.optim import AdamW
+from torch.optim import SparseAdam
 from tqdm import tqdm
+import time
 
 
 class Trainer:
     def __init__(self,
                  train_epochs: int = 10,
-                 batch_size: int = 2048,
+                 train_batch_size: int = 2048,
+                 eval_batch_size: int = 64,
                  embedding_dim: int = 64,
                  learning_rate: float = 0.001,
                  train_eval_every_n: int = 1
     ):
         self.train_epochs = train_epochs
-        self.batch_size = batch_size
+        self.batch_size = train_batch_size
+        self.eval_batch_size = eval_batch_size
         self.embedding_dim = embedding_dim
         self.learning_rate = learning_rate
         self.train_eval_every_n = train_eval_every_n
@@ -45,16 +49,22 @@ class Trainer:
 
         self.model = TwoTowerModel(ads_categorical_features=self.train_dataset.categorical_features, ads_hidden_dims=[1024, 512], n_users=self.train_dataset.n_users, embedding_dim=self.embedding_dim, device=self.device)
 
-        optimizer = AdamW(self.model.parameters(), lr=self.learning_rate)
+        optimizer = AdamW(self.model.dense_grad_parameters(), lr=self.learning_rate)
+        sparse_optimizer = SparseAdam(self.model.sparse_grad_parameters(), lr=self.learning_rate)
+
 
         for epoch in range(self.train_epochs):
             self.model.train()
             with tqdm(train_dataloader, desc=f'Epoch {epoch+1}') as pbar:
                 for batch in pbar:
                     model_loss = self.model(batch)
+                    start = time.time()
                     optimizer.zero_grad()
                     model_loss.backward()
                     optimizer.step()
+                    sparse_optimizer.step()
+                    end = time.time()
+                    #print(f"Backward time: {end - start}")
                     
                     pbar.set_postfix({'Loss': model_loss.item()})
             
@@ -64,7 +74,7 @@ class Trainer:
     
     @torch.inference_mode
     def eval(self):
-        sampler = BatchSampler(RandomSampler(self.eval_dataset), self.batch_size, False)
+        sampler = BatchSampler(RandomSampler(self.eval_dataset), self.eval_batch_size, False)
         eval_dataloader = DataLoader(self.eval_dataset, sampler=sampler, batch_size=None)
         eval_index = self.eval_dataset.get_index()
 

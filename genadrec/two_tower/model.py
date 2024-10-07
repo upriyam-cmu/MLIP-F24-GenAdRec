@@ -2,9 +2,11 @@ import torch
 from dataset.interactions import AdBatch
 from dataset.interactions import CategoricalFeature
 from dataset.interactions import UserBatch
+from itertools import chain
 from torch import nn
 from two_tower.loss import SampledSoftmaxLoss
 from typing import Iterable
+import time
 
 
 class L2NormalizationLayer(nn.Module):
@@ -21,7 +23,7 @@ class UserTower(nn.Module):
     def __init__(self, n_users, embedding_dim, device):
         super().__init__()
         self.id_embedding = nn.Sequential(
-            nn.Embedding(n_users, embedding_dim, device=device),
+            nn.Embedding(n_users, embedding_dim, sparse=True, device=device),
             L2NormalizationLayer(dim=-1)
         )
         self.device = device
@@ -39,7 +41,7 @@ class AdEmbedder(nn.Module):
         super().__init__()
 
         self.embedding_modules = nn.ModuleDict({
-            feat.name: nn.Embedding(feat.num_classes, embedding_dim, device=device) 
+            feat.name: nn.Embedding(feat.num_classes, embedding_dim, sparse=True, device=device) 
             for feat in categorical_features
         })
         
@@ -93,11 +95,18 @@ class TwoTowerModel(nn.Module):
         self.user_tower = UserTower(n_users=n_users, embedding_dim=embedding_dim, device=device)
         self.sampled_softmax = SampledSoftmaxLoss()
         self.device = device
+
+    def dense_grad_parameters(self):
+        return self.ad_tower.mlp.parameters()
+    
+    def sparse_grad_parameters(self):
+        return chain(self.user_tower.id_embedding.parameters(), self.ad_tower.ad_embedder.embedding_modules.parameters())
     
     def forward(self, batch):
+        start = time.time()
         ad_embedding = self.ad_tower(batch.ad_feats).squeeze(0)
         user_embedding = self.user_tower(batch.user_feats).squeeze(0)
-
+        #import pdb; pdb.set_trace()
         # In-batch softmax. Maybe TODO: Use random index
         batch_loss = self.sampled_softmax.forward(
             user_embedding,
@@ -105,7 +114,8 @@ class TwoTowerModel(nn.Module):
             batch.ad_feats.adgroup_id,
             batch.ad_feats.q_proba.flatten()
         )
-
+        end = time.time()
+        #print(f"Forward: {end - start}")
         return batch_loss
 
     def user_forward(self, batch):

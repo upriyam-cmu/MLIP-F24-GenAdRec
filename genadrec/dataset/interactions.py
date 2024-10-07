@@ -2,8 +2,10 @@ import torch
 import pandas as pd
 import numpy as np
 from functools import cached_property
+from sklearn.preprocessing import OrdinalEncoder
 from torch.utils.data import Dataset
 from typing import NamedTuple
+import time
 
 
 class CategoricalFeature(NamedTuple):
@@ -45,6 +47,12 @@ class RawInteractionsDataset(Dataset):
         user_diff = sorted_sample["user"].diff().fillna(-1)
         adgroup_diff = sorted_sample["adgroup_id"].diff().fillna(-1)
         deduped = sorted_sample[~((adgroup_diff == 0) & (user_diff == 0) & (timestamp_diff < 15 * 60))]
+
+        deduped = deduped.merge(
+            deduped[deduped["clk"] == 1].groupby("user")["adgroup_id"].count().reset_index().rename({"adgroup_id": "clk_pu"}, axis="columns"),
+            on="user", how="left"
+        )
+        deduped = deduped[deduped["clk_pu"] > 2]
         return deduped
     
     def _train_test_split(self, df):
@@ -89,15 +97,33 @@ class InteractionsDataset(Dataset):
         ).merge(
             self.user_profile, on="user", how="left"
         )
+
+        all_data = pd.concat(raw_interactions_dataset.get_train_test_split()).merge(
+            self.ad_feature, on="adgroup_id", how="left"
+        ).merge(
+            self.user_profile, on="user", how="left"
+        )
+
         self.data = self.with_ads_occ_proba(self.data)
+
+        self.data = self.encode_categories(all_data, self.data)
 
         if shuffle:
             self.data = self.data.iloc[np.random.permutation(np.arange(len(self.data)))].reset_index().drop(columns="index")
 
+    def encode_categories(self, train, target):
+        ordinal_encoder = OrdinalEncoder(dtype=np.int32)
+        ad_feats = [feat for feat in AdBatch._fields if feat != "q_proba"]
+        ordinal_encoder.fit(train[list(UserBatch._fields)])
+        target[list(UserBatch._fields)] = ordinal_encoder.transform(target[list(UserBatch._fields)])
+        ordinal_encoder.fit(train[ad_feats].fillna(-1))
+        target[ad_feats] = ordinal_encoder.transform(target[ad_feats].fillna(-1))
+        return target
+
     @cached_property
     def categorical_features(self):
         feat_names = AdBatch._fields
-        max_values = self.ad_feature.max()
+        max_values = self.data.max()
         return [
             CategoricalFeature(feat_name, int(max_values[feat_name])+1) for feat_name in feat_names 
             if feat_name not in ("adgroup_id", "q_proba")
@@ -125,6 +151,7 @@ class InteractionsDataset(Dataset):
         return index
     
     def __getitem__(self, index) -> InteractionsBatch:
+        start = time.time()
         data = self.data.iloc[index]
 
         user_feats = data[list(UserBatch._fields)]
@@ -137,7 +164,9 @@ class InteractionsDataset(Dataset):
         clk = torch.tensor(clk).to(torch.int32)
         
         train_index = self.get_index(self.train_index_size)
-
+        end = time.time()
+        #import pdb; pdb.set_trace()
+        #print(f"Getitem time: {end - start}")
         return InteractionsBatch(
             user_feats=user_batch,
             ad_feats=ad_batch,
