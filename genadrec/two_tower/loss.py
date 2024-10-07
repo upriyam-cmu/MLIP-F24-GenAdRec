@@ -11,9 +11,11 @@ class SampledSoftmaxLoss(nn.Module):
 
         B = len(q_probas)
         miss = target_ids != target_ids.T
+        miss = miss.to(device=sim.device)
         
         n_miss = miss.sum(axis=1).unsqueeze(1)
         pos_sim = torch.diagonal(sim)
+        q_probas = q_probas.to(device=sim.device)
         neg_exp = (
             miss * (1 - torch.eye(B, device=sim.device)) *
             torch.exp(
