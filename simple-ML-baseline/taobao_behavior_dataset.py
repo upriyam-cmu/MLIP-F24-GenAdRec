@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import polars as pl
+import torch.nn.functional as F
 from sklearn.preprocessing import OrdinalEncoder
 from torch.utils.data.dataset import Dataset
 
@@ -89,13 +90,4 @@ class TaobaoUserClicksDataset(Dataset):
         return len(self.clicks)
 
     def __getitem__(self, idx):
-        user_data, ads_data, timestamps, clicks = self.user_data[idx], self.ads_data[idx], self.timestamps[idx], self.clicks[idx]
-        ads_masks = [np.ones((len(clicks), dim)) for dim in self.output_dims[1:]]
-        for i in range(len(clicks)):
-            ad_data = ads_data[i]
-            if self.include_ad_ids:
-                ad_data = ad_data[1:]
-            for j, mask in enumerate(ads_masks):
-                mask[i, self.conditional_mappings[j][tuple(ad_data[:j+1])]] = 0
-        return user_data, ads_data, ads_masks,timestamps, clicks
- 
+        return self.user_data[idx], self.ads_data[idx], self.timestamps[idx], self.clicks[idx]
