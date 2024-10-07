@@ -1,4 +1,4 @@
-data/
+data
 **/__pycache__/
 *.egg-info/
 zips/
@@ -6,5 +6,5 @@ template/
 .DS_Store
 .venv
 venv
-
+models
 __pycache__
