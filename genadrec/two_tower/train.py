@@ -53,17 +53,40 @@ class Trainer:
         for epoch in range(self.train_epochs):
             self.model.train()
             training_losses = []
+            ft, bt, st, dt = [], [], [], []
             with tqdm(train_dataloader, desc=f'Epoch {epoch+1}') as pbar:
+                start_data = time.time()
                 for batch in pbar:
+                    end_data = time.time()
+                    time_data = end_data - start_data
+                    start = time.time()
                     model_loss = self.model(batch)
+                    end = time.time()
+                    forward_time = end - start
+                    start = time.time()
                     optimizer.zero_grad()
                     model_loss.backward()
+                    end = start.time()
+                    backward_time = end - start
+                    start = time.time()
                     optimizer.step()
                     sparse_optimizer.step()
-                    #print(f"Backward time: {end - start}")
+                    end = time.time()
+                    step_time = end - start
                     
                     training_losses.append(model_loss.item())
+                    ft.append(forward_time)
+                    bt.append(backward_time)
+                    st.append(step_time)
+                    dt.append(time_data)
+
                     pbar.set_postfix({'Loss': np.mean(training_losses[-100:])})
+                    pbar.set_postfix({'Forward Time': np.mean(ft[-100:])})
+                    pbar.set_postfix({'Backward Time': np.mean(bt[-100:])})
+                    pbar.set_postfix({'Step Time': np.mean(st[-100:])})
+                    pbar.set_postfix({'Data': np.mean(dt[-100:])})
+
+                    start_data = time.time()
             
             if epoch % self.train_eval_every_n == 0:
                 self.eval()
@@ -104,7 +127,6 @@ def accumulate_metrics(query, target, index, ks, metrics=None):
             metrics[f"hr@{k}"] = hits
 
     return metrics
-
 
 
 if __name__ == "__main__":

@@ -177,7 +177,7 @@ class InteractionsDataset(Dataset):
         train_index = self.get_index(self.train_index_size)
         end = time.time()
         #import pdb; pdb.set_trace()
-        #print(f"Getitem time: {end - start}")
+        print(f"Getitem time: {end - start}")
         return InteractionsBatch(
             user_feats=user_batch,
             ad_feats=ad_batch,
