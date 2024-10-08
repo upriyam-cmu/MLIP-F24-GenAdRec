@@ -106,7 +106,6 @@ class TwoTowerModel(nn.Module):
         start = time.time()
         ad_embedding = self.ad_tower(batch.ad_feats).squeeze(0)
         user_embedding = self.user_tower(batch.user_feats).squeeze(0)
-        import pdb; pdb.set_trace()
         # In-batch softmax. Maybe TODO: Use random index
         batch_loss = self.sampled_softmax.forward(
             user_embedding,
