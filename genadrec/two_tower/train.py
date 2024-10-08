@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 from dataset.interactions import InteractionsDataset
-from dataset.interactions import RawInteractionsDataset
 from torch.utils.data import BatchSampler
 from torch.utils.data import DataLoader
 from torch.utils.data import RandomSampler
@@ -32,15 +31,13 @@ class Trainer:
         self._init_dataset()
 
     def _init_dataset(self):
-        raw_dataset = RawInteractionsDataset()
-        
         self.train_dataset = InteractionsDataset(
-            raw_interactions_dataset=raw_dataset,
+            path="data/",
             is_train=True
         )
         
         self.eval_dataset = InteractionsDataset(
-            raw_interactions_dataset=raw_dataset,
+            path="data/",
             is_train=False
         )
 
@@ -53,20 +50,16 @@ class Trainer:
         optimizer = AdamW(self.model.dense_grad_parameters(), lr=self.learning_rate)
         sparse_optimizer = SparseAdam(self.model.sparse_grad_parameters(), lr=self.learning_rate)
 
-        self.eval()
-
         for epoch in range(self.train_epochs):
             self.model.train()
             training_losses = []
             with tqdm(train_dataloader, desc=f'Epoch {epoch+1}') as pbar:
                 for batch in pbar:
                     model_loss = self.model(batch)
-                    start = time.time()
                     optimizer.zero_grad()
                     model_loss.backward()
                     optimizer.step()
                     sparse_optimizer.step()
-                    end = time.time()
                     #print(f"Backward time: {end - start}")
                     
                     training_losses.append(model_loss.item())

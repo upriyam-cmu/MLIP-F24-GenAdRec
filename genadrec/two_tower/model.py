@@ -110,8 +110,9 @@ class TwoTowerModel(nn.Module):
         batch_loss = self.sampled_softmax.forward(
             user_embedding,
             ad_embedding,
-            batch.ad_feats.adgroup_id,
-            batch.ad_feats.q_proba.flatten()
+            batch.ad_feats.adgroup_id.squeeze(0).to(torch.int32),
+            batch.ad_feats.q_proba.squeeze(0).to(torch.float32),
+            batch.is_click == 1
         )
         end = time.time()
         #print(f"Forward: {end - start}")
@@ -122,6 +123,5 @@ class TwoTowerModel(nn.Module):
         return user_embedding
     
     def ad_forward(self, batch):
-        import pdb; pdb.set_trace()
         ad_embedding = self.ad_tower(batch).squeeze(0)
         return ad_embedding
