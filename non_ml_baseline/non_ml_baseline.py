@@ -72,6 +72,7 @@ def run_baseline(user_data, ad_data, behavior_data, interaction_data, *, sample_
         campaign_freqs=campaign_freqs,
     )
 
+    # compute & return ndcg score
     return compute_ndcg(
         score_util,
         target_ad_id=i_ad_id,

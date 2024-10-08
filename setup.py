@@ -12,7 +12,9 @@ setup(
         'torchvision',
         'tqdm',
         'scikit-learn',
-        'pandas'
+        'pandas',
+        'polars',
+        'pyarrow',
     ],
     author="",
     author_email="",
