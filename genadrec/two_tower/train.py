@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 class Trainer:
     def __init__(self,
-                 train_epochs: int = 10,
+                 train_epochs: int = 100,
                  train_batch_size: int = 2048,
                  eval_batch_size: int = 64,
                  embedding_dim: int = 64,
