@@ -21,7 +21,7 @@ class UserBatch(NamedTuple):
 class AdBatch(NamedTuple):
     adgroup_id: torch.Tensor
     cate_id: torch.Tensor
-    campaign_id: torch.Tensor
+    #campaign_id: torch.Tensor
     brand: torch.Tensor
     q_proba: torch.Tensor
 
@@ -38,7 +38,7 @@ class InteractionsDataset(Dataset):
     TRAIN_FILENAME = "train_split.csv"
     EVAL_FILENAME = "eval_split.csv"
     
-    def __init__(self, path: str, shuffle: bool = True, is_train: bool = True, train_index_size: int = 2048):
+    def __init__(self, path: str, shuffle: bool = True, is_train: bool = True, train_index_size: int = 2048, positives_only: int = False):
         super().__init__()
 
         self.raw_sample = pd.read_csv("data/raw_sample.csv").drop(columns=["pid", "nonclk"])
@@ -46,6 +46,7 @@ class InteractionsDataset(Dataset):
         idx = 0 if is_train else 1
         self.is_train = is_train
         self.train_index_size = train_index_size
+        self.positives_only = positives_only
         self.user_profile = pd.read_csv("data/user_profile.csv").rename({"userid": "user"}, axis="columns")
         self.ad_feature = pd.read_csv("data/ad_feature.csv")
 
@@ -163,8 +164,9 @@ class InteractionsDataset(Dataset):
         return index
     
     def __getitem__(self, index) -> InteractionsBatch:
-        start = time.time()
-        data = self.data.iloc[index]
+        #data = self.data.iloc[index]
+        data = self.data[self.data["user"].isin(index)] if self.is_train else self.data.iloc[index]
+        #data = self.data[self.data["user"] == 24727]
 
         user_feats = data[list(UserBatch._fields)]
         ad_feats = data[list(AdBatch._fields)]
@@ -176,7 +178,6 @@ class InteractionsDataset(Dataset):
         clk = torch.tensor(clk).to(torch.int32)
         
         train_index = self.get_index(self.train_index_size)
-        end = time.time()
         #import pdb; pdb.set_trace()
         #print(f"Getitem time: {end - start}")
         return InteractionsBatch(
@@ -188,4 +189,4 @@ class InteractionsDataset(Dataset):
         )
     
     def __len__(self):
-        return len(self.data)
+        return len(self.data["user"].unique()) if self.is_train else len(self.data)
