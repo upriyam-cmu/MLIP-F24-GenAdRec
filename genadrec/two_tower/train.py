@@ -49,8 +49,6 @@ class Trainer:
         optimizer = AdamW(self.model.dense_grad_parameters(), lr=self.learning_rate)
         sparse_optimizer = SparseAdam(self.model.sparse_grad_parameters(), lr=self.learning_rate)
 
-        self.eval()
-
         for epoch in range(self.train_epochs):
             self.model.train()
             training_losses = []
