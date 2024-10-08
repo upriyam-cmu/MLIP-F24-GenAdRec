@@ -72,6 +72,7 @@ class InteractionsDataset(Dataset):
             self.data = self.encode_categories(self.train_data, self.data)
 
             self.data.to_csv(path + self.TRAIN_FILENAME if is_train else path + self.EVAL_FILENAME)
+            self.ad_feature.to_csv("data/ad_feature.csv")
         
         else:
             self.train_data = pd.read_csv(path + self.TRAIN_FILENAME)
