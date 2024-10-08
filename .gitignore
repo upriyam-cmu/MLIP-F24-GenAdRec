@@ -1,3 +1,4 @@
+archive
 data
 **/__pycache__/
 *.egg-info/
@@ -8,3 +9,4 @@ template/
 venv
 models
 __pycache__
+outputs
