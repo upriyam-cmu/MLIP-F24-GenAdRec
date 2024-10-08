@@ -6,6 +6,7 @@ from sklearn.preprocessing import OrdinalEncoder
 from torch.utils.data import Dataset
 from typing import NamedTuple
 import time
+import os
 
 
 class CategoricalFeature(NamedTuple):
@@ -33,14 +34,53 @@ class InteractionsBatch(NamedTuple):
     is_click: torch.Tensor
 
 
-class RawInteractionsDataset(Dataset):
-    def __init__(self):
+class InteractionsDataset(Dataset):
+    TRAIN_FILENAME = "train_split.csv"
+    EVAL_FILENAME = "eval_split.csv"
+    
+    def __init__(self, path: str, shuffle: bool = True, is_train: bool = True, train_index_size: int = 2048):
         super().__init__()
+
         self.raw_sample = pd.read_csv("data/raw_sample.csv").drop(columns=["pid", "nonclk"])
 
-        self.data = self._dedup_interactions()
-        self.train_df, self.test_df = self._train_test_split(self.data)
+        idx = 0 if is_train else 1
+        self.is_train = is_train
+        self.train_index_size = train_index_size
+        self.user_profile = pd.read_csv("data/user_profile.csv").rename({"userid": "user"}, axis="columns")
+        self.ad_feature = pd.read_csv("data/ad_feature.csv")
 
+        train_file_exists = os.path.isfile(path + self.TRAIN_FILENAME)
+        eval_file_exists = os.path.isfile(path + self.EVAL_FILENAME)
+    
+        if not train_file_exists or not eval_file_exists:
+            self.data = self._dedup_interactions()
+            train_test_split = self._train_test_split(self.data)
+            self.data = train_test_split[idx].merge(
+                self.ad_feature, on="adgroup_id", how="left"
+            ).merge(
+                self.user_profile, on="user", how="left"
+            )
+
+            self.train_data = train_test_split[0].merge(
+                self.ad_feature, on="adgroup_id", how="left"
+            ).merge(
+                self.user_profile, on="user", how="left"
+            )
+
+            self.data = self.with_ads_occ_proba(self.data)
+
+            self.data = self.encode_categories(self.train_data, self.data)
+
+            self.data.to_csv(path + self.TRAIN_FILENAME if is_train else path + self.EVAL_FILENAME)
+        
+        else:
+            self.train_data = pd.read_csv(path + self.TRAIN_FILENAME)
+            data_file_path = path + self.TRAIN_FILENAME if self.is_train else path + self.EVAL_FILENAME
+            self.data = pd.read_csv(data_file_path)
+
+        if shuffle:
+            self.data = self.data.iloc[np.random.permutation(np.arange(len(self.data)))].reset_index().drop(columns="index")
+    
     def _dedup_interactions(self):
         sorted_sample = self.raw_sample.sort_values(by=["user", "adgroup_id", "time_stamp"])
         timestamp_diff = sorted_sample["time_stamp"].diff().fillna(-1)
@@ -78,45 +118,6 @@ class RawInteractionsDataset(Dataset):
         train_df, test_df = to_split[train_filter], to_split[test_filter]
 
         return train_df, test_df
-    
-    def get_train_test_split(self):
-        return self.train_df, self.test_df
-
-    def __getitem__(self, index):
-        return self.data.iloc[index]
-    
-    def __len__(self):
-        return len(self.data)
-
-
-class InteractionsDataset(Dataset):
-    def __init__(self, raw_interactions_dataset: RawInteractionsDataset, shuffle: bool = True, is_train: bool = True, train_index_size: int = 2048):
-        super().__init__()
-        idx = 0 if is_train else 1
-        self.is_train = is_train
-        self.train_index_size = train_index_size
-        self.user_profile = pd.read_csv("data/user_profile.csv").rename({"userid": "user"}, axis="columns")
-        self.ad_feature = pd.read_csv("data/ad_feature.csv")
-        
-        train_test_split = raw_interactions_dataset.get_train_test_split()
-        self.data = train_test_split[idx].merge(
-            self.ad_feature, on="adgroup_id", how="left"
-        ).merge(
-            self.user_profile, on="user", how="left"
-        )
-
-        self.train_data = train_test_split[0].merge(
-            self.ad_feature, on="adgroup_id", how="left"
-        ).merge(
-            self.user_profile, on="user", how="left"
-        )
-
-        self.data = self.with_ads_occ_proba(self.data)
-
-        self.data = self.encode_categories(self.train_data, self.data)
-
-        if shuffle:
-            self.data = self.data.iloc[np.random.permutation(np.arange(len(self.data)))].reset_index().drop(columns="index")
 
     def encode_categories(self, train, target):
         user_encoder = OrdinalEncoder(dtype=np.int32)

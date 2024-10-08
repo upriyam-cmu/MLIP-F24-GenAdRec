@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 from dataset.interactions import InteractionsDataset
-from dataset.interactions import RawInteractionsDataset
 from torch.utils.data import BatchSampler
 from torch.utils.data import DataLoader
 from torch.utils.data import RandomSampler
@@ -32,15 +31,13 @@ class Trainer:
         self._init_dataset()
 
     def _init_dataset(self):
-        raw_dataset = RawInteractionsDataset()
-        
         self.train_dataset = InteractionsDataset(
-            raw_interactions_dataset=raw_dataset,
+            path="data/",
             is_train=True
         )
         
         self.eval_dataset = InteractionsDataset(
-            raw_interactions_dataset=raw_dataset,
+            path="data/",
             is_train=False
         )
 
@@ -53,24 +50,43 @@ class Trainer:
         optimizer = AdamW(self.model.dense_grad_parameters(), lr=self.learning_rate)
         sparse_optimizer = SparseAdam(self.model.sparse_grad_parameters(), lr=self.learning_rate)
 
-        self.eval()
-
         for epoch in range(self.train_epochs):
             self.model.train()
             training_losses = []
+            ft, bt, st, dt = [], [], [], []
             with tqdm(train_dataloader, desc=f'Epoch {epoch+1}') as pbar:
+                start_data = time.time()
                 for batch in pbar:
+                    end_data = time.time()
+                    time_data = end_data - start_data
+                    start = time.time()
                     model_loss = self.model(batch)
+                    end = time.time()
+                    forward_time = end - start
                     start = time.time()
                     optimizer.zero_grad()
                     model_loss.backward()
+                    end = time.time()
+                    backward_time = end - start
+                    start = time.time()
                     optimizer.step()
                     sparse_optimizer.step()
                     end = time.time()
-                    #print(f"Backward time: {end - start}")
+                    step_time = end - start
                     
                     training_losses.append(model_loss.item())
+                    ft.append(forward_time)
+                    bt.append(backward_time)
+                    st.append(step_time)
+                    dt.append(time_data)
+
                     pbar.set_postfix({'Loss': np.mean(training_losses[-100:])})
+                    #pbar.set_postfix({'Forward Time': np.mean(ft[-100:])})
+                    pbar.set_postfix({'Backward Time': np.mean(bt[-100:])})
+                    #pbar.set_postfix({'Step Time': np.mean(st[-100:])})
+                    #pbar.set_postfix({'Data': np.mean(dt[-100:])})
+
+                    start_data = time.time()
             
             if epoch % self.train_eval_every_n == 0:
                 self.eval()
@@ -111,7 +127,6 @@ def accumulate_metrics(query, target, index, ks, metrics=None):
             metrics[f"hr@{k}"] = hits
 
     return metrics
-
 
 
 if __name__ == "__main__":
