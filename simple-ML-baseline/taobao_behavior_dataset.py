@@ -90,4 +90,12 @@ class TaobaoUserClicksDataset(Dataset):
         return len(self.clicks)
 
     def __getitem__(self, idx):
-        return self.user_data[idx], self.ads_data[idx], self.timestamps[idx], self.clicks[idx]
+        user_data, ads_data, timestamps, clicks = self.user_data[idx], self.ads_data[idx], self.timestamps[idx], self.clicks[idx]
+        ads_masks = [np.zeros(self.output_dims[0], dtype=bool)]
+        for i, dim in enumerate(self.output_dims[1:]):
+            mask = np.ones(dim, dtype=bool)
+            mask[self.conditional_mappings[i][tuple(
+                ads_data[(1 if self.include_ad_ids else 0):i+(2 if self.include_ad_ids else 1)].tolist()
+            )]] = False
+            ads_masks.append(mask)
+        return user_data, ads_data, ads_masks, timestamps, clicks
