@@ -81,10 +81,10 @@ class Trainer:
                     dt.append(time_data)
 
                     pbar.set_postfix({'Loss': np.mean(training_losses[-100:])})
-                    pbar.set_postfix({'Forward Time': np.mean(ft[-100:])})
+                    #pbar.set_postfix({'Forward Time': np.mean(ft[-100:])})
                     pbar.set_postfix({'Backward Time': np.mean(bt[-100:])})
-                    pbar.set_postfix({'Step Time': np.mean(st[-100:])})
-                    pbar.set_postfix({'Data': np.mean(dt[-100:])})
+                    #pbar.set_postfix({'Step Time': np.mean(st[-100:])})
+                    #pbar.set_postfix({'Data': np.mean(dt[-100:])})
 
                     start_data = time.time()
             
