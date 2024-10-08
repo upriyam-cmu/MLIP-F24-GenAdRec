@@ -17,11 +17,13 @@ print("Using device:", device)
 # %%
 parser = argparse.ArgumentParser()
 parser.add_argument("--run_label", type=str)
+parser.add_argument("--eval_only", action="store_true")
 parser.add_argument("--conditional", action="store_true")
 parser.add_argument("--user_feats", action="store_true")
 
 args = parser.parse_args()
 run_label = args.run_label
+eval_only = args.eval_only
 conditional = args.conditional
 user_feats = args.user_feats
 
@@ -83,8 +85,8 @@ if not os.path.isdir(outputs_dir):
 start_epoch = 0
 best_val_loss = float('inf')
 train_loss_per_epoch = []
-epoch_train_loss_curve = []
 test_loss_per_epoch = []
+epoch_train_loss_curve = []
 
 # %%
 if not os.path.isdir(model_dir):
@@ -97,6 +99,9 @@ else:
         model.load_state_dict(state_dicts['model_state_dict'])
         optimizer.load_state_dict(state_dicts['optimizer_state_dict'])
         best_val_loss = state_dicts['best_val_loss']
+        train_loss_per_epoch = state_dicts['train_loss_per_epoch']
+        test_loss_per_epoch = state_dicts['test_loss_per_epoch']
+        epoch_train_loss_curve = state_dicts['epoch_loss_curves']
 
 # %%
 for epoch in range(start_epoch, train_epochs):
@@ -106,13 +111,16 @@ for epoch in range(start_epoch, train_epochs):
         for user_data, ads_features, ads_masks, _, _ in pbar:
             user_data = user_data.to(device)
             ads_features = ads_features.to(device)
-            ads_masks = [mask.to(device) for mask in ads_masks]
+            if conditional:
+                ads_masks = [None] + [mask.to(device) for mask in ads_masks]
+            else:
+                ads_masks = [None] * (len(ads_masks)+1)
             
             optimizer.zero_grad()
             ad_feature_logits = model(user_data)
             loss = loss_fn(
                 logits = ad_feature_logits,
-                logit_masks = [None] + ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
+                logit_masks = ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
                 targets = ads_features
             )
             loss.backward()
@@ -154,6 +162,9 @@ for epoch in range(start_epoch, train_epochs):
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'best_val_loss': best_val_loss,
+                    'train_loss_per_epoch': train_loss_per_epoch,
+                    'test_loss_per_epoch': test_loss_per_epoch,
+                    'epoch_loss_curves': epoch_train_loss_curve
                 }, os.path.join(model_dir, 'best_model.pth'))
 
     if epoch % save_every_n == 0:
@@ -162,6 +173,9 @@ for epoch in range(start_epoch, train_epochs):
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'best_val_loss': best_val_loss,
+            'train_loss_per_epoch': train_loss_per_epoch,
+            'test_loss_per_epoch': test_loss_per_epoch,
+            'epoch_loss_curves': epoch_train_loss_curve
         }, os.path.join(model_dir, f'epoch_{epoch}.pth'))
 
     np.save(os.path.join(outputs_dir, 'train_loss_per_epoch.npy'), train_loss_per_epoch)
