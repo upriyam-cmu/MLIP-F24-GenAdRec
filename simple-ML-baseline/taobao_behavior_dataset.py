@@ -1,7 +1,6 @@
 import os
 import numpy as np
 import polars as pl
-import torch.nn.functional as F
 from sklearn.preprocessing import OrdinalEncoder
 from torch.utils.data.dataset import Dataset
 
@@ -11,7 +10,7 @@ class TaobaoUserClicksDataset(Dataset):
         include_user_ids = True,
         user_features = [], #, "final_gender_code", "age_level", "pvalue_level", "shopping_level", "occupation", "new_user_class_level"],
         include_ad_ids = False,
-        ad_features = ["cate_id", "brand", "customer", "campaign_id"],         
+        ad_features = ["cate_id", "brand", "customer", "campaign_id"],
     ):
         assert num_validation >= 0, "num_validation must be non-negative"
         assert include_user_ids or user_features, "must specify at least one user feature to include"
@@ -48,15 +47,18 @@ class TaobaoUserClicksDataset(Dataset):
         )
         self.user_encoder = OrdinalEncoder(dtype=np.int64).fit(click_data.select(self.user_feats))
         self.ad_encoder = OrdinalEncoder(dtype=np.int64).fit(click_data.select(self.ad_feats))
-        
+
         self.input_dims = [user.shape[0] for user in self.user_encoder.categories_]
         self.output_dims = [category.shape[0] for category in self.ad_encoder.categories_]
-        
+
         self.ad_encoder.set_output(transform="polars")
+        ad_feats: pl.DataFrame = self.ad_encoder.transform(click_data.select(self.ad_feats))
+        self.ad_encoder.set_output(transform="default")
+
         self.conditional_mappings = []
         for i in range(1, len(ad_features)):
             conditional_map = (
-                self.ad_encoder.transform(click_data.select(self.ad_feats))
+                ad_feats
                 .select(ad_features[:i+1])
                 .group_by(ad_features[:i])
                 .agg(
@@ -66,8 +68,7 @@ class TaobaoUserClicksDataset(Dataset):
             )
             conditional_map.index = list(zip(*[conditional_map[ad_features[j]] for j in range(i)]))
             self.conditional_mappings.append(conditional_map.to_dict()[ad_features[i]])
-        self.ad_encoder.set_output(transform="default")
-                
+
         user_clicks = (
             click_data
             .sort("user", "time_stamp", nulls_last=True)
@@ -84,18 +85,19 @@ class TaobaoUserClicksDataset(Dataset):
         self.ads_data = self.ad_encoder.transform(user_clicks[:, len(self.user_feats):-2])
         
         self.timestamps = user_clicks[:, -2].astype(int)
-        self.clicks = user_clicks[:, -1].astype(int)
-        
+        self.clicks = user_clicks[:, -1].astype(bool)
+
     def __len__(self):
         return len(self.clicks)
 
     def __getitem__(self, idx):
         user_data, ads_data, timestamps, clicks = self.user_data[idx], self.ads_data[idx], self.timestamps[idx], self.clicks[idx]
-        ads_masks = [np.zeros(self.output_dims[0], dtype=bool)]
+        ads_masks = []
+        ad_feats_start = 1 if self.include_ad_ids else 0
         for i, dim in enumerate(self.output_dims[1:]):
+            ad_feats_end = i + 1 + ad_feats_start
+            mask_indices = self.conditional_mappings[i][tuple(ads_data[ad_feats_start:ad_feats_end].tolist())]
             mask = np.ones(dim, dtype=bool)
-            mask[self.conditional_mappings[i][tuple(
-                ads_data[(1 if self.include_ad_ids else 0):i+(2 if self.include_ad_ids else 1)].tolist()
-            )]] = False
+            mask[mask_indices] = False
             ads_masks.append(mask)
         return user_data, ads_data, ads_masks, timestamps, clicks

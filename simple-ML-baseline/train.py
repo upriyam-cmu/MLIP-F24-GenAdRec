@@ -2,6 +2,7 @@
 import os
 import torch
 import numpy as np
+import argparse
 from taobao_behavior_dataset import TaobaoUserClicksDataset
 from ad_features_predictor import AdFeaturesPredictor
 from masked_cross_entropy_loss import MaskedCrossEntropyLoss
@@ -14,20 +15,31 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
 # %%
+parser = argparse.ArgumentParser()
+parser.add_argument("--run_label", type=str)
+parser.add_argument("--conditional", action="store_true")
+parser.add_argument("--user_feats", action="store_true")
+
+args = parser.parse_args()
+run_label = args.run_label
+conditional = args.conditional
+user_feats = args.user_feats
+
+# %%
 batch_size = 2048
 learning_rate = 0.001
-train_epochs = 15
+train_epochs = 20
 eval_every_n = 1
 save_every_n = 1
-model_dir = "models"
-outputs_dir = "outputs"
+model_dir = os.path.join("models", run_label)
+outputs_dir = os.path.join("outputs", run_label)
 
 # %%
 dataset_params = {
     "data_dir": "../data",
     "filter_clicks": True,
     "include_user_ids": True,
-    "user_features": [],
+    "user_features": ["final_gender_code", "age_level", "shopping_level", "occupation"] if user_feats else [],
     "include_ad_ids": False,
     "ad_features": ["cate_id", "brand", "customer", "campaign_id"],
 }
@@ -44,6 +56,7 @@ model = AdFeaturesPredictor(
     embedding_dims=[64] * len(train_dataset.input_dims),
     hidden_dim_specs=[(128, 64)] * len(train_dataset.output_dims),
     output_cardinalities=train_dataset.output_dims,
+    conditioned=conditional,
     activation_function='nn.ReLU()',
     device=device,
 )
@@ -99,7 +112,7 @@ for epoch in range(start_epoch, train_epochs):
             ad_feature_logits = model(user_data)
             loss = loss_fn(
                 logits = ad_feature_logits,
-                logit_masks = ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
+                logit_masks = [None] + ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
                 targets = ads_features
             )
             loss.backward()
@@ -123,7 +136,7 @@ for epoch in range(start_epoch, train_epochs):
                     ad_feature_logits = model(user_data)
                     loss = loss_fn(
                         logits = ad_feature_logits,
-                        logit_masks = ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
+                        logit_masks = [None] + ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
                         targets = ads_features,
                         penalize_masked = False
                     )

@@ -32,12 +32,8 @@ class MultiEmbedder(nn.Module):
         assert len(X.shape) == 2 and X.shape[-1] == self.input_size, f"Expected input shape (*, {self.input_size}). Got {X.shape} instead."
         batch_size = X.shape[0]
 
-        feature_split = torch.split(X, self.input_size, dim=-1)  # retains dimensionality of feature dim
-        assert len(feature_split) == self.input_size
-
         X_embed = torch.cat([
-            embedder(feature_slice.reshape(batch_size))  # returns 2D tensors
-            for embedder, feature_slice in zip(self.embedding_layers, feature_split)
+            embedder(X[:, i]) for i, embedder in enumerate(self.embedding_layers)
         ], dim=-1)
 
         expected_output_shape = (batch_size, self.output_size)
@@ -85,6 +81,7 @@ class AdFeaturesPredictor(nn.Module):
         embedding_dims: List[int],
         hidden_dim_specs: List[List[int]],
         output_cardinalities: List[int],
+        conditioned: bool = False,
         *,
         activation_function: str = 'nn.ReLU()',
         device,
@@ -93,6 +90,8 @@ class AdFeaturesPredictor(nn.Module):
         assert len(hidden_dim_specs) == len(output_cardinalities), "hidden_dim_specs and output_cardinalities must have same length"
         
         super().__init__()
+        
+        self.conditioned = conditioned
 
         self.embedder = MultiEmbedder(
             input_cardinalities=input_cardinalities,
@@ -103,7 +102,7 @@ class AdFeaturesPredictor(nn.Module):
         feature_blocks, prev_output_size, input_embed_size = [], 0, self.embedder.output_size
         for hidden_dim_spec, output_size in zip(hidden_dim_specs, output_cardinalities):
             feature_block = FeatureBlock(
-                input_size=input_embed_size + prev_output_size,
+                input_size=input_embed_size + (prev_output_size if self.conditioned else 0),
                 hidden_dims=hidden_dim_spec,
                 output_size=output_size,
                 activation_function=activation_function,
@@ -118,7 +117,8 @@ class AdFeaturesPredictor(nn.Module):
         embed, hidden, outputs = self.embedder(input_features), None, []
 
         for feature_block in self.feature_blocks:
-            hidden, output = feature_block(embed if hidden is None else torch.cat([embed, hidden], dim=-1))
+            hidden, output = feature_block(embed if not self.conditioned or hidden is None
+                                           else torch.cat([embed, hidden], dim=-1))
             outputs.append(output)
 
         return tuple(outputs)
