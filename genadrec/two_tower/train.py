@@ -66,7 +66,7 @@ class Trainer:
                     start = time.time()
                     optimizer.zero_grad()
                     model_loss.backward()
-                    end = start.time()
+                    end = time.time()
                     backward_time = end - start
                     start = time.time()
                     optimizer.step()
