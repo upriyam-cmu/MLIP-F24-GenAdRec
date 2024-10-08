@@ -1,4 +1,5 @@
 import os
+import torch
 import numpy as np
 import polars as pl
 import torch.nn.functional as F
@@ -91,11 +92,9 @@ class TaobaoUserClicksDataset(Dataset):
 
     def __getitem__(self, idx):
         user_data, ads_data, timestamps, clicks = self.user_data[idx], self.ads_data[idx], self.timestamps[idx], self.clicks[idx]
-        ads_masks = [np.zeros(self.output_dims[0], dtype=bool)]
-        for i, dim in enumerate(self.output_dims[1:]):
-            mask = np.ones(dim, dtype=bool)
-            mask[self.conditional_mappings[i][tuple(
-                ads_data[(1 if self.include_ad_ids else 0):i+(2 if self.include_ad_ids else 1)].tolist()
-            )]] = False
-            ads_masks.append(mask)
+        ads_masks = [None]
+        ad_feats_start = 1 if self.include_ad_ids else 0
+        for i, mapping in enumerate(self.conditional_mappings):
+            ad_feats_end = i + 1 + ad_feats_start
+            ads_masks.append(mapping.get(tuple(ads_data[ad_feats_start:ad_feats_end].tolist())))
         return user_data, ads_data, ads_masks, timestamps, clicks
