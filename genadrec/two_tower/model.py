@@ -8,6 +8,20 @@ from two_tower.loss import SampledSoftmaxLoss
 from typing import Iterable
 import time
 
+def build_mlp(in_dim, hidden_dims, out_dim):
+    mlp = nn.Sequential(
+        nn.Linear(in_dim, hidden_dims[0]),
+        nn.SiLU()
+    )
+
+    for in_d, out_d in zip(hidden_dims[:-1], hidden_dims[1:]):
+        mlp.append(nn.Linear(in_d, out_d))
+        mlp.append(nn.SiLU())
+    
+    mlp.append(nn.Linear(hidden_dims[-1], out_dim))
+    mlp.append(L2NormalizationLayer(dim=-1))
+    return mlp
+
 
 class L2NormalizationLayer(nn.Module):
     def __init__(self, dim=1, eps=1e-12):
@@ -20,16 +34,19 @@ class L2NormalizationLayer(nn.Module):
 
 
 class UserTower(nn.Module):
-    def __init__(self, n_users, embedding_dim, device):
+    def __init__(self, n_users, embedding_dim, hidden_dims, device):
         super().__init__()
         self.id_embedding = nn.Sequential(
             nn.Embedding(n_users, embedding_dim, sparse=True, device=device),
             L2NormalizationLayer(dim=-1)
         )
+        self.mlp = build_mlp(embedding_dim, hidden_dims, embedding_dim).to(device)
         self.device = device
     
     def forward(self, batch: UserBatch):
-        return self.id_embedding(batch.user.to(self.device))
+        emb = self.id_embedding(batch.user.to(self.device))
+        x = self.mlp(emb)
+        return x
     
 
 class AdEmbedder(nn.Module):
@@ -65,22 +82,8 @@ class AdTower(nn.Module):
         super().__init__()
         self.device = device
         self.ad_embedder = AdEmbedder(categorical_features, embedding_dim, device=device)
-        self.mlp = self.build_mlp(self.ad_embedder.out_dim, hidden_dims, embedding_dim)
+        self.mlp = build_mlp(self.ad_embedder.out_dim, hidden_dims, embedding_dim).to(self.device)
     
-    def build_mlp(self, in_dim, hidden_dims, out_dim):
-        mlp = nn.Sequential(
-            nn.Linear(in_dim, hidden_dims[0]),
-            nn.SiLU()
-        )
-
-        for in_d, out_d in zip(hidden_dims[:-1], hidden_dims[1:]):
-            mlp.append(nn.Linear(in_d, out_d))
-            mlp.append(nn.SiLU())
-        
-        mlp.append(nn.Linear(hidden_dims[-1], out_dim))
-        mlp.append(L2NormalizationLayer(dim=-1))
-        return mlp.to(self.device)
-
     def forward(self, batch):
         emb = self.ad_embedder(batch)
         x = self.mlp(emb)
@@ -92,18 +95,17 @@ class TwoTowerModel(nn.Module):
         super().__init__()
 
         self.ad_tower = AdTower(categorical_features=ads_categorical_features, embedding_dim=embedding_dim, hidden_dims=ads_hidden_dims, device=device)
-        self.user_tower = UserTower(n_users=n_users, embedding_dim=embedding_dim, device=device)
+        self.user_tower = UserTower(n_users=n_users, embedding_dim=embedding_dim, hidden_dims=ads_hidden_dims, device=device)
         self.sampled_softmax = SampledSoftmaxLoss()
         self.device = device
 
     def dense_grad_parameters(self):
-        return self.ad_tower.mlp.parameters()
+        return chain(self.ad_tower.mlp.parameters(), self.user_tower.mlp.parameters())
     
     def sparse_grad_parameters(self):
         return chain(self.user_tower.id_embedding.parameters(), self.ad_tower.ad_embedder.embedding_modules.parameters())
     
     def forward(self, batch):
-        start = time.time()
         ad_embedding = self.ad_tower(batch.ad_feats).squeeze(0)
         user_embedding = self.user_tower(batch.user_feats).squeeze(0)
         # In-batch softmax. Maybe TODO: Use random index
@@ -111,10 +113,10 @@ class TwoTowerModel(nn.Module):
             user_embedding,
             ad_embedding,
             batch.ad_feats.adgroup_id.squeeze(0).to(torch.int32),
+            batch.user_feats.user.squeeze(0).to(torch.int32),
             batch.ad_feats.q_proba.squeeze(0).to(torch.float32),
             batch.is_click == 1
         )
-        end = time.time()
         #print(f"Forward: {end - start}")
         return batch_loss
 
