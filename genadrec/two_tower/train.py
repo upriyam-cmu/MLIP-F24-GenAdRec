@@ -79,7 +79,7 @@ class Trainer:
         index_emb = self.model.ad_forward(eval_index)
         with tqdm(eval_dataloader, desc=f'Eval') as pbar:
             for batch in pbar:
-                user_emb, target_emb = self.model.user_forward(batch.user_feats), self.model.ad_forward(batch.ad_feats)
+                user_emb, target_emb = self.model.eval_forward(batch)
                 
                 metrics = accumulate_metrics(user_emb, target_emb, index_emb, ks=[1,5,10,50,100,200], metrics=metrics)
         
