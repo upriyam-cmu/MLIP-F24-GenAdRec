@@ -14,7 +14,7 @@ class Trainer:
     def __init__(self,
                  train_epochs: int = 100,
                  train_batch_size: int = 32,
-                 eval_batch_size: int = 2,
+                 eval_batch_size: int = 64,
                  embedding_dim: int = 64,
                  learning_rate: float = 0.001,
                  train_eval_every_n: int = 1
@@ -113,6 +113,6 @@ def accumulate_metrics(query, target, index, ks, metrics=None):
 
 
 if __name__ == "__main__":
-    trainer = Trainer(learning_rate=0.005, embedding_dim=32)
+    trainer = Trainer(learning_rate=0.005, embedding_dim=128)
     trainer.train()
 

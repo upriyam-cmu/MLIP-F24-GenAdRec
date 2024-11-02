@@ -165,20 +165,20 @@ class InteractionsDataset(Dataset):
         return index
     
     def __getitem__(self, index) -> InteractionsBatch:
-        #data = self.data.iloc[index]
-        data = self.data[self.data["user"].isin(index)] if self.is_train else self.data.iloc[index]
         #data = self.data[self.data["user"] == 24727]
         if not self.is_train:
+            data = self.data.iloc[index]
             eval_users = data["user"]
             history_data = self.train_data[self.train_data["user"].isin(eval_users)]
             
             is_eval = torch.cat([
-                torch.ones(len(history_data), dtype=bool),
-                torch.zeros(len(data), dtype=bool)
+                torch.zeros(len(history_data), dtype=bool),
+                torch.ones(len(data), dtype=bool)
             ])
 
-            data = pd.concat([self.data[self.data["user"].isin(eval_users)], data])
+            data = pd.concat([history_data, data])
         else:
+            data = self.data[self.data["user"].isin(index)] if self.is_train else self.data.iloc[index]
             is_eval = torch.zeros(len(data), dtype=bool)
         
         user_feats = data[list(UserBatch._fields)]

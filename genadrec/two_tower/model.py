@@ -54,16 +54,15 @@ class UserHistoryTower(nn.Module):
         super().__init__()
         self.embedding_dim = embedding_dim
         self.mlp = build_mlp(embedding_dim, hidden_dims, embedding_dim).to(device)
-        self.norm = L2NormalizationLayer(dim=-1)
         self.device = device
 
     def forward(self, batch: InteractionsBatch, ad_embeddings: torch.Tensor):
         user_matches = (batch.user_feats.user.T == batch.user_feats.user)
         causal_mask = (batch.timestamp.unsqueeze(1) > batch.timestamp.unsqueeze(0))
-        mask = (batch.is_click * user_matches * causal_mask).to(ad_embeddings.dtype)
+        mask = (batch.is_click * user_matches * causal_mask).to(ad_embeddings.dtype).to(ad_embeddings.device)
         norm_mask = mask / (mask.sum(axis=1).unsqueeze(1) + 1e-16)
         history_emb = torch.einsum("ij,jk->ik", norm_mask, ad_embeddings)
-        x = self.norm(self.mlp(history_emb))
+        x = self.mlp(history_emb)
         x[torch.norm(history_emb, dim=1) == 0, :] = 0
         return x
     
@@ -102,11 +101,10 @@ class AdTower(nn.Module):
         self.device = device
         self.ad_embedder = AdEmbedder(categorical_features, embedding_dim, device=device)
         self.mlp = build_mlp(self.ad_embedder.out_dim, hidden_dims, embedding_dim).to(self.device)
-        self.norm = L2NormalizationLayer(dim=-1)
     
     def forward(self, batch: AdBatch):
         emb = self.ad_embedder(batch)
-        x = self.norm(self.mlp(emb))
+        x = self.mlp(emb)
         return x
 
 
@@ -153,9 +151,9 @@ class TwoTowerModel(nn.Module):
         return batch_loss
 
     def eval_forward(self, batch: InteractionsBatch):
-        ad_embedding = self.ad_tower(batch).squeeze(0)[batch.is_eval, :]
-        user_embedding = self.user_tower(batch, ad_embedding)[batch.is_eval, :]
-        return (user_embedding, ad_embedding)
+        ad_embedding = self.ad_tower(batch.ad_feats).squeeze(0)
+        user_embedding = self.user_tower(batch, ad_embedding)
+        return (user_embedding[batch.is_eval, :], ad_embedding[batch.is_eval, :])
 
     def ad_forward(self, batch: AdBatch):
         return self.ad_tower(batch).squeeze(0)
