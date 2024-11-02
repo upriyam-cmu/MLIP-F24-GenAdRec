@@ -156,3 +156,6 @@ class TwoTowerModel(nn.Module):
         ad_embedding = self.ad_tower(batch).squeeze(0)[batch.is_eval, :]
         user_embedding = self.user_tower(batch, ad_embedding)[batch.is_eval, :]
         return (user_embedding, ad_embedding)
+
+    def ad_forward(self, batch: AdBatch):
+        return self.ad_tower(batch).squeeze(0)
