@@ -1,3 +1,4 @@
+import os
 import torch
 import pandas as pd
 import numpy as np
@@ -5,8 +6,6 @@ from functools import cached_property
 from sklearn.preprocessing import OrdinalEncoder
 from torch.utils.data import Dataset
 from typing import NamedTuple
-import time
-import os
 
 
 class CategoricalFeature(NamedTuple):
@@ -20,9 +19,9 @@ class UserBatch(NamedTuple):
 
 class AdBatch(NamedTuple):
     adgroup_id: torch.Tensor
-    cate_id: torch.Tensor
+    #cate_id: torch.Tensor
     #campaign_id: torch.Tensor
-    brand: torch.Tensor
+    #brand: torch.Tensor
     q_proba: torch.Tensor
 
 
@@ -35,14 +34,16 @@ class InteractionsBatch(NamedTuple):
     is_eval: torch.Tensor
 
 
+EXCLUDE_ADGROUP_EMB = True
+MIN_CLK_PER_USER = 5
+
+
 class InteractionsDataset(Dataset):
     TRAIN_FILENAME = "train_split.csv"
     EVAL_FILENAME = "eval_split.csv"
     
-    def __init__(self, path: str, shuffle: bool = True, is_train: bool = True, train_index_size: int = 2048, positives_only: int = False):
+    def __init__(self, path: str, shuffle: bool = True, is_train: bool = True, train_index_size: int = 2048, positives_only: int = False, force_reload: bool = False):
         super().__init__()
-
-        self.raw_sample = pd.read_csv("data/raw_sample.csv").drop(columns=["pid", "nonclk"])
 
         idx = 0 if is_train else 1
         self.is_train = is_train
@@ -54,7 +55,9 @@ class InteractionsDataset(Dataset):
         train_file_exists = os.path.isfile(path + self.TRAIN_FILENAME)
         eval_file_exists = os.path.isfile(path + self.EVAL_FILENAME)
     
-        if not train_file_exists or not eval_file_exists:
+        if force_reload or not train_file_exists or not eval_file_exists:
+            print("Reloading dataset...")
+            self.raw_sample = pd.read_csv("data/raw_sample.csv").drop(columns=["pid", "nonclk"])
             self.data = self._dedup_interactions()
             train_test_split = self._train_test_split(self.data)
             self.data = train_test_split[idx].merge(
@@ -112,7 +115,7 @@ class InteractionsDataset(Dataset):
         clicks["clk_cnt"] = click_cnt
         clicks = clicks.reset_index().drop(columns="index")
         clicks = clicks.merge(clk_per_user.reset_index().rename({"clk":"clk_per_user"}, axis="columns"), on="user")
-        split_timestamp = clicks[(clicks["clk_cnt"] == clicks["clk_per_user"]) & (clicks["clk_per_user"] > 1)][["user", "time_stamp"]]
+        split_timestamp = clicks[(clicks["clk_cnt"] == clicks["clk_per_user"]) & (clicks["clk_per_user"] >= MIN_CLK_PER_USER)][["user", "time_stamp"]]
 
         to_split = df.merge(split_timestamp.rename({"time_stamp": "split_timestamp"}, axis="columns"), on="user", how="left")
         test_filter = (to_split["clk"] == 1) & (to_split["split_timestamp"] <= to_split["time_stamp"])
@@ -138,9 +141,12 @@ class InteractionsDataset(Dataset):
     @cached_property
     def categorical_features(self):
         feat_names = AdBatch._fields
+        excluded = ["q_proba"]
+        if not EXCLUDE_ADGROUP_EMB:
+            excluded.append("adgroup_id")
         return [
             CategoricalFeature(feat_name, len(self.train_data[feat_name].unique())+2) for feat_name in feat_names 
-            if feat_name not in ("adgroup_id", "q_proba")
+            if feat_name not in excluded
         ]
 
     @cached_property
@@ -167,17 +173,18 @@ class InteractionsDataset(Dataset):
     def __getitem__(self, index) -> InteractionsBatch:
         #data = self.data.iloc[index]
         data = self.data[self.data["user"].isin(index)] if self.is_train else self.data.iloc[index]
+        #import pdb; pdb.set_trace()
         #data = self.data[self.data["user"] == 24727]
         if not self.is_train:
             eval_users = data["user"]
             history_data = self.train_data[self.train_data["user"].isin(eval_users)]
             
             is_eval = torch.cat([
-                torch.ones(len(history_data), dtype=bool),
-                torch.zeros(len(data), dtype=bool)
+                torch.zeros(len(history_data), dtype=bool),
+                torch.ones(len(data), dtype=bool)
             ])
 
-            data = pd.concat([self.data[self.data["user"].isin(eval_users)], data])
+            data = pd.concat([history_data, data])
         else:
             is_eval = torch.zeros(len(data), dtype=bool)
         
@@ -191,7 +198,6 @@ class InteractionsDataset(Dataset):
         clk = torch.tensor(clk).to(torch.int32)
         
         train_index = self.get_index(self.train_index_size)
-        #import pdb; pdb.set_trace()
         #print(f"Getitem time: {end - start}")
         return InteractionsBatch(
             user_feats=user_batch,

@@ -17,12 +17,13 @@ class SampledSoftmaxLoss(nn.Module):
         pos_emb = input_emb[mask & pos_mask]
         pos_sim = torch.einsum("ij,ij->i", pos_emb, target_emb[mask & pos_mask])
         neg_sim = torch.einsum("id,kd->ik", pos_emb, target_emb[~mask])
-        miss = (target_ids[mask & pos_mask].unsqueeze(1) != target_ids[~mask]).to(torch.float32)
+        miss = (target_ids[mask & pos_mask].unsqueeze(1) != target_ids[~mask])
 
         if self.user_history_negs:
             same_user = (user_ids[mask & pos_mask].unsqueeze(1) == user_ids[~mask])
-            same_user = (same_user | (same_user.sum(axis=1) == 0).unsqueeze(1)).to(torch.float32)
-            miss = miss * same_user
+            same_user = (same_user | (same_user.sum(axis=1) == 0).unsqueeze(1))
+            miss = (miss & same_user & ((~miss).sum(axis=0) == 0)).to(torch.float32)
+            #miss *= ((1 - miss).sum(axis=0) == 0).to(torch.float32)
         
         n_miss = miss.sum(axis=1).unsqueeze(1)
         neg_exp = torch.exp(
@@ -31,4 +32,6 @@ class SampledSoftmaxLoss(nn.Module):
         neg_exp = torch.einsum("ij,ij->i", miss, neg_exp)
         pos_exp = torch.exp(pos_sim)
         batch_loss = (-pos_sim + torch.log(pos_exp + neg_exp)).mean()
+        #if batch_loss.item() < 8.4:
+        import pdb; pdb.set_trace()
         return batch_loss
