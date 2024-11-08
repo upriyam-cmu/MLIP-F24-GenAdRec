@@ -114,7 +114,13 @@ class AdFeaturesPredictor(nn.Module):
         self.feature_blocks = nn.ModuleList(feature_blocks)
 
     def forward(self, input_features: torch.Tensor) -> List[torch.Tensor]:
-        embed, hidden, outputs = self.embedder(input_features), None, []
+        return self.sample(self.embed(input_features))
+
+    def embed(self, input_features: torch.Tensor) -> List[torch.Tensor]:
+        return self.embedder(input_features)
+
+    def sample(self, user_embeddings: torch.Tensor) -> List[torch.Tensor]:
+        embed, hidden, outputs = user_embeddings, None, []
 
         for feature_block in self.feature_blocks:
             hidden, output = feature_block(
@@ -123,5 +129,5 @@ class AdFeaturesPredictor(nn.Module):
                 else torch.cat([embed, hidden], dim=-1)
             )
             outputs.append(output)
-
+        
         return tuple(outputs)
