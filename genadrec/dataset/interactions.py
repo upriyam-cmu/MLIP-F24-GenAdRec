@@ -171,12 +171,9 @@ class InteractionsDataset(Dataset):
         return index
     
     def __getitem__(self, index) -> InteractionsBatch:
-<<<<<<< HEAD
         #data = self.data.iloc[index]
         data = self.data[self.data["user"].isin(index)] if self.is_train else self.data.iloc[index]
         #import pdb; pdb.set_trace()
-=======
->>>>>>> eb021b71571c4912363b419fc7989bd5afc6574a
         #data = self.data[self.data["user"] == 24727]
         if not self.is_train:
             data = self.data.iloc[index]

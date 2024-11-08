@@ -61,19 +61,12 @@ class UserHistoryTower(nn.Module):
         causal_mask = (batch.timestamp.unsqueeze(1) > batch.timestamp.unsqueeze(0))
         mask = (batch.is_click * user_matches * causal_mask).to(ad_embeddings.dtype).to(ad_embeddings.device)
         norm_mask = mask / (mask.sum(axis=1).unsqueeze(1) + 1e-16)
-<<<<<<< HEAD
         #history_emb = torch.einsum("ij,jk->ik", norm_mask, ad_embeddings)
         x = self.mlp(ad_embeddings)
         history_emb = torch.einsum("ij,jk->ik", norm_mask, x)
         #x[torch.norm(history_emb, dim=1) == 0, :] = 0
         #import pdb; pdb.set_trace()
         return history_emb
-=======
-        history_emb = torch.einsum("ij,jk->ik", norm_mask, ad_embeddings)
-        x = self.mlp(history_emb)
-        x[torch.norm(history_emb, dim=1) == 0, :] = 0
-        return x
->>>>>>> eb021b71571c4912363b419fc7989bd5afc6574a
     
 
 class AdEmbedder(nn.Module):
@@ -160,13 +153,8 @@ class TwoTowerModel(nn.Module):
 
     def eval_forward(self, batch: InteractionsBatch):
         ad_embedding = self.ad_tower(batch.ad_feats).squeeze(0)
-<<<<<<< HEAD
         user_embedding = self.user_tower(batch, ad_embedding)[batch.is_eval, :]
         return (user_embedding, ad_embedding[batch.is_eval, :])
-=======
-        user_embedding = self.user_tower(batch, ad_embedding)
-        return (user_embedding[batch.is_eval, :], ad_embedding[batch.is_eval, :])
->>>>>>> eb021b71571c4912363b419fc7989bd5afc6574a
 
     def ad_forward(self, batch: AdBatch):
         return self.ad_tower(batch).squeeze(0)
