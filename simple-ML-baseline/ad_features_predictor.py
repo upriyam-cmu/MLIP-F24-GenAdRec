@@ -81,7 +81,7 @@ class AdFeaturesPredictor(nn.Module):
         embedding_dims: List[int],
         hidden_dim_specs: List[List[int]],
         output_cardinalities: List[int],
-        conditioned: bool = False,
+        residual_connections: bool = False,
         *,
         activation_function: str = 'nn.ReLU()',
         device,
@@ -91,7 +91,7 @@ class AdFeaturesPredictor(nn.Module):
         
         super().__init__()
         
-        self.conditioned = conditioned
+        self.residual_connections = residual_connections
 
         self.embedder = MultiEmbedder(
             input_cardinalities=input_cardinalities,
@@ -102,7 +102,7 @@ class AdFeaturesPredictor(nn.Module):
         feature_blocks, prev_output_size, input_embed_size = [], 0, self.embedder.output_size
         for hidden_dim_spec, output_size in zip(hidden_dim_specs, output_cardinalities):
             feature_block = FeatureBlock(
-                input_size=input_embed_size + (prev_output_size if self.conditioned else 0),
+                input_size=input_embed_size + (prev_output_size if self.residual_connections else 0),
                 hidden_dims=hidden_dim_spec,
                 output_size=output_size,
                 activation_function=activation_function,
@@ -117,8 +117,11 @@ class AdFeaturesPredictor(nn.Module):
         embed, hidden, outputs = self.embedder(input_features), None, []
 
         for feature_block in self.feature_blocks:
-            hidden, output = feature_block(embed if not self.conditioned or hidden is None
-                                           else torch.cat([embed, hidden], dim=-1))
+            hidden, output = feature_block(
+                embed
+                if not self.residual_connections or hidden is None
+                else torch.cat([embed, hidden], dim=-1)
+            )
             outputs.append(output)
 
         return tuple(outputs)

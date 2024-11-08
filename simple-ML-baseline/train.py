@@ -26,12 +26,14 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--run_label", type=str)
 parser.add_argument("--eval_only", action="store_true")
 parser.add_argument("--conditional", action="store_true")
+parser.add_argument("--residual", action="store_true")
 parser.add_argument("--user_feats", action="store_true")
 
 args = parser.parse_args()
 run_label = args.run_label
 eval_only = args.eval_only
 conditional = args.conditional
+residual = args.residual
 user_feats = args.user_feats
 
 # %%
@@ -67,7 +69,7 @@ model = AdFeaturesPredictor(
     embedding_dims=[64] * len(train_dataset.input_dims),
     hidden_dim_specs=[(128, 64)] * len(train_dataset.output_dims),
     output_cardinalities=train_dataset.output_dims,
-    conditioned=conditional,
+    residual_connections=residual,
     activation_function='nn.ReLU()',
     device=device,
 )

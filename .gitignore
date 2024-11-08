@@ -11,3 +11,4 @@ models
 __pycache__
 outputs
 .vscode
+out
