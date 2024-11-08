@@ -1,7 +1,7 @@
 import torch
 from dataset.interactions import AdBatch
 from dataset.interactions import CategoricalFeature
-from dataset.interactions import UserBatch
+from dataset.interactions import InteractionsBatch
 from itertools import chain
 from torch import nn
 from two_tower.loss import SampledSoftmaxLoss
@@ -24,7 +24,7 @@ def build_mlp(in_dim, hidden_dims, out_dim):
 
 
 class L2NormalizationLayer(nn.Module):
-    def __init__(self, dim=1, eps=1e-12):
+    def __init__(self, dim=1, eps=1e-16):
         super(L2NormalizationLayer, self).__init__()
         self.dim = dim
         self.eps = eps
@@ -33,7 +33,7 @@ class L2NormalizationLayer(nn.Module):
         return nn.functional.normalize(x, p=2, dim=self.dim, eps=self.eps)
 
 
-class UserTower(nn.Module):
+class UserIdTower(nn.Module):
     def __init__(self, n_users, embedding_dim, hidden_dims, device):
         super().__init__()
         self.id_embedding = nn.Sequential(
@@ -43,9 +43,27 @@ class UserTower(nn.Module):
         self.mlp = build_mlp(embedding_dim, hidden_dims, embedding_dim).to(device)
         self.device = device
     
-    def forward(self, batch: UserBatch):
-        emb = self.id_embedding(batch.user.to(self.device))
+    def forward(self, batch: InteractionsBatch):
+        emb = self.id_embedding(batch.user_feats.user.to(self.device))
         x = self.mlp(emb)
+        return x
+
+
+class UserHistoryTower(nn.Module):
+    def __init__(self, embedding_dim, hidden_dims, device):
+        super().__init__()
+        self.embedding_dim = embedding_dim
+        self.mlp = build_mlp(embedding_dim, hidden_dims, embedding_dim).to(device)
+        self.device = device
+
+    def forward(self, batch: InteractionsBatch, ad_embeddings: torch.Tensor):
+        user_matches = (batch.user_feats.user.T == batch.user_feats.user)
+        causal_mask = (batch.timestamp.unsqueeze(1) > batch.timestamp.unsqueeze(0))
+        mask = (batch.is_click * user_matches * causal_mask).to(ad_embeddings.dtype).to(ad_embeddings.device)
+        norm_mask = mask / (mask.sum(axis=1).unsqueeze(1) + 1e-16)
+        history_emb = torch.einsum("ij,jk->ik", norm_mask, ad_embeddings)
+        x = self.mlp(history_emb)
+        x[torch.norm(history_emb, dim=1) == 0, :] = 0
         return x
     
 
@@ -84,30 +102,41 @@ class AdTower(nn.Module):
         self.ad_embedder = AdEmbedder(categorical_features, embedding_dim, device=device)
         self.mlp = build_mlp(self.ad_embedder.out_dim, hidden_dims, embedding_dim).to(self.device)
     
-    def forward(self, batch):
+    def forward(self, batch: AdBatch):
         emb = self.ad_embedder(batch)
         x = self.mlp(emb)
         return x
 
 
 class TwoTowerModel(nn.Module):
-    def __init__(self, ads_categorical_features, ads_hidden_dims, n_users, embedding_dim, device):
+    def __init__(self, ads_categorical_features, ads_hidden_dims, n_users, embedding_dim, device, use_user_ids=False):
         super().__init__()
 
         self.ad_tower = AdTower(categorical_features=ads_categorical_features, embedding_dim=embedding_dim, hidden_dims=ads_hidden_dims, device=device)
-        self.user_tower = UserTower(n_users=n_users, embedding_dim=embedding_dim, hidden_dims=ads_hidden_dims, device=device)
+        self.user_tower = (
+            UserIdTower(n_users=n_users, embedding_dim=embedding_dim, hidden_dims=ads_hidden_dims, device=device) if use_user_ids
+            else UserHistoryTower(embedding_dim=embedding_dim, hidden_dims=ads_hidden_dims, device=device)
+        )
+        self.use_user_ids = use_user_ids
         self.sampled_softmax = SampledSoftmaxLoss()
         self.device = device
 
     def dense_grad_parameters(self):
-        return chain(self.ad_tower.mlp.parameters(), self.user_tower.mlp.parameters())
+        if self.use_user_ids:
+            return chain(self.ad_tower.mlp.parameters(), self.user_tower.mlp.parameters())
+        return self.ad_tower.mlp.parameters()
     
     def sparse_grad_parameters(self):
-        return chain(self.user_tower.id_embedding.parameters(), self.ad_tower.ad_embedder.embedding_modules.parameters())
+        if self.use_user_ids:
+            return chain(self.user_tower.id_embedding.parameters(), self.ad_tower.ad_embedder.embedding_modules.parameters())
+        return self.ad_tower.ad_embedder.embedding_modules.parameters()
     
-    def forward(self, batch):
+    def forward(self, batch: InteractionsBatch):
         ad_embedding = self.ad_tower(batch.ad_feats).squeeze(0)
-        user_embedding = self.user_tower(batch.user_feats).squeeze(0)
+        if self.use_user_ids:
+            user_embedding = self.user_tower(batch).squeeze(0)
+        else:
+            user_embedding = self.user_tower(batch, ad_embedding)
         # In-batch softmax. Maybe TODO: Use random index
         batch_loss = self.sampled_softmax.forward(
             user_embedding,
@@ -115,15 +144,16 @@ class TwoTowerModel(nn.Module):
             batch.ad_feats.adgroup_id.squeeze(0).to(torch.int32),
             batch.user_feats.user.squeeze(0).to(torch.int32),
             batch.ad_feats.q_proba.squeeze(0).to(torch.float32),
-            batch.is_click == 1
+            batch.is_click == 1,
+            torch.norm(user_embedding, dim=1) != 0
         )
         #print(f"Forward: {end - start}")
         return batch_loss
 
-    def user_forward(self, batch):
-        user_embedding = self.user_tower(batch).squeeze(0)
-        return user_embedding
-    
-    def ad_forward(self, batch):
-        ad_embedding = self.ad_tower(batch).squeeze(0)
-        return ad_embedding
+    def eval_forward(self, batch: InteractionsBatch):
+        ad_embedding = self.ad_tower(batch.ad_feats).squeeze(0)
+        user_embedding = self.user_tower(batch, ad_embedding)
+        return (user_embedding[batch.is_eval, :], ad_embedding[batch.is_eval, :])
+
+    def ad_forward(self, batch: AdBatch):
+        return self.ad_tower(batch).squeeze(0)

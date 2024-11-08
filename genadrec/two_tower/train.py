@@ -14,7 +14,7 @@ class Trainer:
     def __init__(self,
                  train_epochs: int = 100,
                  train_batch_size: int = 32,
-                 eval_batch_size: int = 2,
+                 eval_batch_size: int = 64,
                  embedding_dim: int = 64,
                  learning_rate: float = 0.001,
                  train_eval_every_n: int = 1
@@ -86,7 +86,7 @@ class Trainer:
         index_emb = self.model.ad_forward(eval_index)
         with tqdm(eval_dataloader, desc=f'Eval') as pbar:
             for batch in pbar:
-                user_emb, target_emb = self.model.user_forward(batch.user_feats), self.model.ad_forward(batch.ad_feats)
+                user_emb, target_emb = self.model.eval_forward(batch)
                 
                 metrics = accumulate_metrics(user_emb, target_emb, index_emb, ks=[1,5,10,50,100,200], metrics=metrics)
         
@@ -113,6 +113,6 @@ def accumulate_metrics(query, target, index, ks, metrics=None):
 
 
 if __name__ == "__main__":
-    trainer = Trainer(learning_rate=0.005, embedding_dim=32)
+    trainer = Trainer(learning_rate=0.005, embedding_dim=128)
     trainer.train()
 

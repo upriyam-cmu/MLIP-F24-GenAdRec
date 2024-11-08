@@ -32,6 +32,7 @@ class InteractionsBatch(NamedTuple):
     train_index: AdBatch
     timestamp: torch.Tensor
     is_click: torch.Tensor
+    is_eval: torch.Tensor
 
 
 class InteractionsDataset(Dataset):
@@ -164,10 +165,22 @@ class InteractionsDataset(Dataset):
         return index
     
     def __getitem__(self, index) -> InteractionsBatch:
-        #data = self.data.iloc[index]
-        data = self.data[self.data["user"].isin(index)] if self.is_train else self.data.iloc[index]
         #data = self.data[self.data["user"] == 24727]
+        if not self.is_train:
+            data = self.data.iloc[index]
+            eval_users = data["user"]
+            history_data = self.train_data[self.train_data["user"].isin(eval_users)]
+            
+            is_eval = torch.cat([
+                torch.zeros(len(history_data), dtype=bool),
+                torch.ones(len(data), dtype=bool)
+            ])
 
+            data = pd.concat([history_data, data])
+        else:
+            data = self.data[self.data["user"].isin(index)] if self.is_train else self.data.iloc[index]
+            is_eval = torch.zeros(len(data), dtype=bool)
+        
         user_feats = data[list(UserBatch._fields)]
         ad_feats = data[list(AdBatch._fields)]
         user_batch = UserBatch(*torch.tensor(user_feats.to_numpy().astype(np.int32).T).split(1, dim=0))
@@ -186,6 +199,7 @@ class InteractionsDataset(Dataset):
             train_index=train_index,
             timestamp=timestamp,
             is_click=clk,
+            is_eval=is_eval
         )
     
     def __len__(self):
