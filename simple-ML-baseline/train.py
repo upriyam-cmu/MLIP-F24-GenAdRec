@@ -9,6 +9,7 @@ from masked_cross_entropy_loss import MaskedCrossEntropyLoss
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from tqdm import tqdm
+from non_ml_baseline.simple_eval import FrequencyTracker, ReductionTracker, ScoreUtil, compute_ndcg
 
 # %%
 if torch.cuda.is_available():
@@ -36,7 +37,7 @@ user_feats = args.user_feats
 # %%
 batch_size = 2048
 learning_rate = 0.001
-train_epochs = 20
+train_epochs = 30
 eval_every_n = 1
 save_every_n = 1
 model_dir = os.path.join("models", run_label)
@@ -52,6 +53,8 @@ dataset_params = {
     "ad_features": ["cate_id", "brand", "customer", "campaign_id"],
 }
 train_dataset = TaobaoUserClicksDataset(training=True, **dataset_params)
+if eval_only:
+    dataset_params['include_ad_ids'] = True
 test_dataset = TaobaoUserClicksDataset(training=False, **dataset_params)
 
 # %%
@@ -68,6 +71,52 @@ model = AdFeaturesPredictor(
     activation_function='nn.ReLU()',
     device=device,
 )
+
+# %%
+if eval_only:
+    reduction_tracker = ReductionTracker(test_dataset.ad_features)
+    
+    model.load_state_dict(torch.load(os.path.join(model_dir, "best_model.pth"))['model_state_dict'])
+    model.eval()
+    with torch.inference_mode(), tqdm(test_dataloader) as pbar:
+        n_users = 0
+        ndcg_scores = []
+        for user_data, ads_features, ads_masks, _, _ in pbar:
+            n_users += user_data.shape[0]
+            
+            user_data = user_data.to(device)
+            ads_features = ads_features.to(device)
+            ads_masks = [None] + [mask.to(device) for mask in ads_masks]
+
+            ad_feature_logits = *model(user_data), ads_features[:, 0]
+            for d_cat, d_brand, d_cust, d_camp, target_ad_id in zip(*ad_feature_logits):
+                category_freqs = FrequencyTracker.from_softmax_distribution(d_cat.exp())
+                brand_freqs = FrequencyTracker.from_softmax_distribution(d_brand.exp())
+                customer_freqs = FrequencyTracker.from_softmax_distribution(d_cust.exp())
+                campaign_freqs = FrequencyTracker.from_softmax_distribution(d_camp.exp())
+
+                score_util = ScoreUtil(
+                    reduction_tracker=reduction_tracker,
+                    category_freqs=category_freqs,
+                    brand_freqs=brand_freqs,
+                    customer_freqs=customer_freqs,
+                    campaign_freqs=campaign_freqs,
+                )
+                
+                ndcg_scores.append(compute_ndcg(
+                    score_util,
+                    target_ad_id=target_ad_id.item(),
+                    subsampling=1 / 20,
+                    verbose=False,
+                    use_tqdm=True,
+                ))
+
+                if len(ndcg_scores) > 60:
+                    print(run_label, np.mean(ndcg_scores))
+                    exit(0)
+
+
+# %%
 loss_fn = MaskedCrossEntropyLoss()
 optimizer = AdamW(model.parameters(), lr=learning_rate)
 
@@ -145,12 +194,12 @@ for epoch in range(start_epoch, train_epochs):
                 for user_data, ads_features, ads_masks, _, _ in pbar:
                     user_data = user_data.to(device)
                     ads_features = ads_features.to(device)
-                    ads_masks = [mask.to(device) for mask in ads_masks]
+                    ads_masks = [None] + [mask.to(device) for mask in ads_masks]
 
                     ad_feature_logits = model(user_data)
                     loss = loss_fn(
                         logits = ad_feature_logits,
-                        logit_masks = [None] + ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
+                        logit_masks = ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
                         targets = ads_features,
                         penalize_masked = False
                     )

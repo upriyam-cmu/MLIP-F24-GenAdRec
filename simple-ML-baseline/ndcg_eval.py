@@ -8,10 +8,10 @@ from non_ml_baseline.simple_eval import FrequencyTracker, ReductionTracker, Scor
 # user_features: (N, F) > N = batch/sample size
 # target_ad_id: (N,)
 # ad_data : (D, 5) > [ad_id, category, brand, customer, campaign]
-def score_model_ndcg(model: nn.Module, dataset, ad_feature_csv: np.ndarray, *, device, batch_size: int = 128):
-    reduction_tracker = ReductionTracker(dataset.ads_data)
+def score_model_ndcg(model: nn.Module, dataset, *, device, batch_size: int = 128):
+    reduction_tracker = ReductionTracker(dataset.ad_features)
 
-    user_features = torch.Tensor(user_features, device=device)
+    user_features = torch.Tensor(dataset.u, device=device)
     batches = torch.split(user_features, batch_size, 0)
 
     ndcg_scores = []
