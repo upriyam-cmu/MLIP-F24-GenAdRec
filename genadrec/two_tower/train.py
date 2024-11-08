@@ -14,7 +14,7 @@ class Trainer:
     def __init__(self,
                  train_epochs: int = 100,
                  train_batch_size: int = 32,
-                 eval_batch_size: int = 2,
+                 eval_batch_size: int = 64,
                  embedding_dim: int = 64,
                  learning_rate: float = 0.001,
                  train_eval_every_n: int = 1,

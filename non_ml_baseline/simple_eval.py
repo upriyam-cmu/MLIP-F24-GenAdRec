@@ -130,7 +130,7 @@ def compute_ndcg(
     np.random.shuffle(ad_data)
 
     target_ad_data = ad_data[ad_data[:, 0] == target_ad_id]
-    assert target_ad_data.shape == (1, 5)
+    assert target_ad_data.shape == (1, 5), f"{target_ad_data.shape} != (1, 5), {ad_data.shape}, {target_ad_id}"
     ad_id, category, brand, customer, campaign = target_ad_data.flatten()
     assert ad_id == target_ad_id
     target_ad_score, feature_scores = score_util.score_ad(category, brand, customer, campaign)

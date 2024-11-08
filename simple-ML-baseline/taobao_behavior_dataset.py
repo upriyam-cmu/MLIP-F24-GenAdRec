@@ -53,6 +53,7 @@ class TaobaoUserClicksDataset(Dataset):
 
         self.ad_encoder.set_output(transform="polars")
         ad_feats: pl.DataFrame = self.ad_encoder.transform(click_data.select(self.ad_feats))
+        self.ad_features = ad_feats.unique().to_numpy()
         self.ad_encoder.set_output(transform="default")
 
         self.conditional_mappings = []
@@ -94,7 +95,7 @@ class TaobaoUserClicksDataset(Dataset):
         user_data, ads_data, timestamps, clicks = self.user_data[idx], self.ads_data[idx], self.timestamps[idx], self.clicks[idx]
         ads_masks = []
         ad_feats_start = 1 if self.include_ad_ids else 0
-        for i, dim in enumerate(self.output_dims[1:]):
+        for i, dim in enumerate(self.output_dims[1+ad_feats_start:]):
             ad_feats_end = i + 1 + ad_feats_start
             mask_indices = self.conditional_mappings[i][tuple(ads_data[ad_feats_start:ad_feats_end].tolist())]
             mask = np.ones(dim, dtype=bool)
