@@ -49,14 +49,15 @@ class Trainer:
         
         self.eval_dataset = InteractionsDataset(
             path="data/",
-            is_train=False
+            is_train=False,
+            force_reload=self.force_dataset_reload
         )
 
     def train(self):
         sampler = BatchSampler(RandomSampler(self.train_dataset), self.batch_size, False)
         train_dataloader = DataLoader(self.train_dataset, sampler=sampler, batch_size=None)
 
-        self.model = TwoTowerModel(ads_categorical_features=self.train_dataset.categorical_features, ads_hidden_dims=[1024, 512, 128], n_users=self.train_dataset.n_users, embedding_dim=self.embedding_dim, device=self.device)
+        self.model = TwoTowerModel(ads_categorical_features=self.train_dataset.categorical_features, ads_hidden_dims=[1024, 512, 128], n_users=self.train_dataset.n_users, embedding_dim=self.embedding_dim, use_user_ids=True, device=self.device)
 
         optimizer = AdamW(self.model.dense_grad_parameters(), lr=self.learning_rate)
         sparse_optimizer = SparseAdam(self.model.sparse_grad_parameters(), lr=self.learning_rate)
@@ -81,7 +82,7 @@ class Trainer:
                     
                     training_losses.append(model_loss.item())
 
-                    pbar.set_postfix({'Loss': np.mean(training_losses[-20:])})
+                    pbar.set_postfix({'Loss': np.mean(training_losses[-50:])})
             
             if epoch % self.train_eval_every_n == 0:
                 self.eval()
@@ -125,9 +126,9 @@ def accumulate_metrics(query, target, index, ks, metrics=None):
 
 if __name__ == "__main__":
     trainer = Trainer(
-        learning_rate=0.0001,
-        eval_batch_size=32,
-        train_batch_size=64,
+        learning_rate=0.0005,
+        eval_batch_size=256,
+        train_batch_size=32,
         embedding_dim=32,
         force_dataset_reload=False
     )

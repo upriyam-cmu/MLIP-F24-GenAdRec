@@ -1,6 +1,7 @@
 import os
 import torch
 import pandas as pd
+import pyarrow.parquet as pq
 import numpy as np
 from functools import cached_property
 from sklearn.preprocessing import OrdinalEncoder
@@ -39,18 +40,24 @@ MIN_CLK_PER_USER = 5
 
 
 class InteractionsDataset(Dataset):
-    TRAIN_FILENAME = "train_split.csv"
-    EVAL_FILENAME = "eval_split.csv"
+    TRAIN_FILENAME = "train_split.parquet"
+    EVAL_FILENAME = "eval_split.parquet"
     
-    def __init__(self, path: str, shuffle: bool = True, is_train: bool = True, train_index_size: int = 2048, positives_only: int = False, force_reload: bool = False):
+    def __init__(self,
+                 path: str,
+                 shuffle: bool = True,
+                 is_train: bool = True,
+                 train_index_size: int = 2048,
+                 positives_only: bool = False,
+                 in_batch_history: bool = False,
+                 force_reload: bool = False):
         super().__init__()
 
         idx = 0 if is_train else 1
         self.is_train = is_train
         self.train_index_size = train_index_size
         self.positives_only = positives_only
-        self.user_profile = pd.read_csv("data/user_profile.csv").rename({"userid": "user"}, axis="columns")
-        self.ad_feature = pd.read_csv("data/ad_feature.csv")
+        self.in_batch_history = in_batch_history
 
         train_file_exists = os.path.isfile(path + self.TRAIN_FILENAME)
         eval_file_exists = os.path.isfile(path + self.EVAL_FILENAME)
@@ -58,6 +65,9 @@ class InteractionsDataset(Dataset):
         if force_reload or not train_file_exists or not eval_file_exists:
             print("Reloading dataset...")
             self.raw_sample = pd.read_csv("data/raw_sample.csv").drop(columns=["pid", "nonclk"])
+            self.user_profile = pd.read_csv("data/user_profile.csv").rename({"userid": "user"}, axis="columns")
+            self.ad_feature = pd.read_csv("data/ad_feature.csv")
+
             self.data = self._dedup_interactions()
             train_test_split = self._train_test_split(self.data)
             self.data = train_test_split[idx].merge(
@@ -76,13 +86,14 @@ class InteractionsDataset(Dataset):
 
             self.data = self.encode_categories(self.train_data, self.data)
 
-            self.data.to_csv(path + self.TRAIN_FILENAME if is_train else path + self.EVAL_FILENAME)
-            self.ad_feature.to_csv("data/ad_feature.csv")
+            self.data.to_parquet(path + self.TRAIN_FILENAME if is_train else path + self.EVAL_FILENAME)
+            self.ad_feature.to_parquet("data/ad_feature.parquet")
         
         else:
-            self.train_data = pd.read_csv(path + self.TRAIN_FILENAME)
+            self.train_data = pq.read_table(source=path + self.TRAIN_FILENAME).to_pandas()
             data_file_path = path + self.TRAIN_FILENAME if self.is_train else path + self.EVAL_FILENAME
-            self.data = pd.read_csv(data_file_path)
+            self.data = pq.read_table(source=data_file_path).to_pandas()
+            self.ad_feature = pq.read_table(source="data/ad_feature.parquet").to_pandas()
 
         if shuffle:
             self.data = self.data.iloc[np.random.permutation(np.arange(len(self.data)))].reset_index().drop(columns="index")
@@ -98,13 +109,12 @@ class InteractionsDataset(Dataset):
             deduped[deduped["clk"] == 1].groupby("user")["adgroup_id"].count().reset_index().rename({"adgroup_id": "clk_pu"}, axis="columns"),
             on="user", how="left"
         )
-        deduped = deduped[deduped["clk_pu"] > 2]
+        deduped = deduped[deduped["clk_pu"] >= MIN_CLK_PER_USER]
         return deduped
     
     def _train_test_split(self, df):
         clicks = df[df["clk"] == 1]
         clk_per_user = clicks.groupby(by="user")["clk"].count()
-        max_clk_per_user = clk_per_user.max()
 
         click_cnt = (
             clicks.sort_values(["time_stamp"], ascending=True)
@@ -115,7 +125,7 @@ class InteractionsDataset(Dataset):
         clicks["clk_cnt"] = click_cnt
         clicks = clicks.reset_index().drop(columns="index")
         clicks = clicks.merge(clk_per_user.reset_index().rename({"clk":"clk_per_user"}, axis="columns"), on="user")
-        split_timestamp = clicks[(clicks["clk_cnt"] == clicks["clk_per_user"]) & (clicks["clk_per_user"] >= MIN_CLK_PER_USER)][["user", "time_stamp"]]
+        split_timestamp = clicks[(clicks["clk_cnt"] == clicks["clk_per_user"]) & (clicks["clk_per_user"] >= 1)][["user", "time_stamp"]]
 
         to_split = df.merge(split_timestamp.rename({"time_stamp": "split_timestamp"}, axis="columns"), on="user", how="left")
         test_filter = (to_split["clk"] == 1) & (to_split["split_timestamp"] <= to_split["time_stamp"])
@@ -175,7 +185,7 @@ class InteractionsDataset(Dataset):
         data = self.data[self.data["user"].isin(index)] if self.is_train else self.data.iloc[index]
         #import pdb; pdb.set_trace()
         #data = self.data[self.data["user"] == 24727]
-        if not self.is_train:
+        if not self.is_train and self.in_batch_history:
             data = self.data.iloc[index]
             eval_users = data["user"]
             history_data = self.train_data[self.train_data["user"].isin(eval_users)]
@@ -187,8 +197,7 @@ class InteractionsDataset(Dataset):
 
             data = pd.concat([history_data, data])
         else:
-            data = self.data[self.data["user"].isin(index)] if self.is_train else self.data.iloc[index]
-            is_eval = torch.zeros(len(data), dtype=bool)
+            is_eval = (not self.is_train) * torch.ones(len(data), dtype=bool)
         
         user_feats = data[list(UserBatch._fields)]
         ad_feats = data[list(AdBatch._fields)]

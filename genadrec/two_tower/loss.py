@@ -27,11 +27,9 @@ class SampledSoftmaxLoss(nn.Module):
         
         n_miss = miss.sum(axis=1).unsqueeze(1)
         neg_exp = torch.exp(
-            neg_sim - torch.log(n_miss*q_probas[~mask]/(1-q_probas[mask & pos_mask].unsqueeze(1)))
+            neg_sim - torch.log(n_miss*q_probas[~mask]/(1-q_probas[mask & pos_mask].unsqueeze(1)) + 1e-10)
         )
         neg_exp = torch.einsum("ij,ij->i", miss, neg_exp)
         pos_exp = torch.exp(pos_sim)
         batch_loss = (-pos_sim + torch.log(pos_exp + neg_exp)).mean()
-        #if batch_loss.item() < 8.4:
-        import pdb; pdb.set_trace()
         return batch_loss
