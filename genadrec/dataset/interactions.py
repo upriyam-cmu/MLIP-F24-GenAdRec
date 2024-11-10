@@ -35,7 +35,7 @@ class InteractionsBatch(NamedTuple):
     is_eval: torch.Tensor
 
 
-EXCLUDE_ADGROUP_EMB = True
+EXCLUDE_ADGROUP_EMB = False
 MIN_CLK_PER_USER = 5
 
 
@@ -152,7 +152,7 @@ class InteractionsDataset(Dataset):
     def categorical_features(self):
         feat_names = AdBatch._fields
         excluded = ["q_proba"]
-        if not EXCLUDE_ADGROUP_EMB:
+        if EXCLUDE_ADGROUP_EMB:
             excluded.append("adgroup_id")
         return [
             CategoricalFeature(feat_name, len(self.train_data[feat_name].unique())+2) for feat_name in feat_names 
