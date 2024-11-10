@@ -68,7 +68,7 @@ class InteractionsDataset(Dataset):
             self.user_profile = pd.read_csv("data/user_profile.csv").rename({"userid": "user"}, axis="columns")
             self.ad_feature = pd.read_csv("data/ad_feature.csv")
 
-            self.data = self._dedup_interactions()
+            self.data = self._dedup_interactions(self.raw_sample)
             train_test_split = self._train_test_split(self.data)
             self.data = train_test_split[idx].merge(
                 self.ad_feature, on="adgroup_id", how="left"
@@ -98,8 +98,8 @@ class InteractionsDataset(Dataset):
         if shuffle:
             self.data = self.data.iloc[np.random.permutation(np.arange(len(self.data)))].reset_index().drop(columns="index")
     
-    def _dedup_interactions(self):
-        sorted_sample = self.raw_sample.sort_values(by=["user", "adgroup_id", "time_stamp"])
+    def _dedup_interactions(self, df):
+        sorted_sample = df.sort_values(by=["user", "adgroup_id", "time_stamp"])
         timestamp_diff = sorted_sample["time_stamp"].diff().fillna(-1)
         user_diff = sorted_sample["user"].diff().fillna(-1)
         adgroup_diff = sorted_sample["adgroup_id"].diff().fillna(-1)
