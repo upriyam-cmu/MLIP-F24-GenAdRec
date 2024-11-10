@@ -140,6 +140,7 @@ class Trainer:
             
             if epoch % self.train_eval_every_n == 0:
                 self.eval(self.model, save_dir=self.save_dir_root + f"eval_{epoch}/")
+            
         return self.model
     
     @torch.inference_mode

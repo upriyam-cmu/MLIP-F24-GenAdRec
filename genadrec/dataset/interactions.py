@@ -16,6 +16,7 @@ class CategoricalFeature(NamedTuple):
 
 class UserBatch(NamedTuple):
     user: torch.Tensor
+    shopping_level: torch.Tensor
 
 
 class AdBatch(NamedTuple):
@@ -201,7 +202,7 @@ class InteractionsDataset(Dataset):
         
         user_feats = data[list(UserBatch._fields)]
         ad_feats = data[list(AdBatch._fields)]
-        user_batch = UserBatch(*torch.tensor(user_feats.to_numpy().astype(np.int32).T).split(1, dim=0))
+        user_batch = UserBatch(*torch.tensor(user_feats.fillna(0).to_numpy().astype(np.int32).T).split(1, dim=0))
         ad_batch = AdBatch(*torch.tensor(ad_feats.fillna(0).to_numpy().T).split(1, dim=0))
         timestamp = [data["time_stamp"]] if not isinstance(data["time_stamp"], pd.Series) else data["time_stamp"].to_numpy()
         timestamp = torch.tensor(timestamp).to(torch.int32)
