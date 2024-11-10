@@ -16,7 +16,6 @@ class CategoricalFeature(NamedTuple):
 
 class UserBatch(NamedTuple):
     user: torch.Tensor
-    shopping_level: torch.Tensor
 
 
 class AdBatch(NamedTuple):
