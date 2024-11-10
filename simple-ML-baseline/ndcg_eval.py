@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from tqdm import tqdm
 
 from non_ml_baseline.simple_eval import FrequencyTracker, ReductionTracker, ScoreUtil, compute_ndcg
 

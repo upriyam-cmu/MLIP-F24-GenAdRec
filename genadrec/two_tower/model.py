@@ -6,7 +6,7 @@ from itertools import chain
 from torch import nn
 from two_tower.loss import SampledSoftmaxLoss
 from typing import Iterable
-import time
+
 
 def build_mlp(in_dim, hidden_dims, out_dim):
     mlp = nn.Sequential(
@@ -61,10 +61,11 @@ class UserHistoryTower(nn.Module):
         causal_mask = (batch.timestamp.unsqueeze(1) > batch.timestamp.unsqueeze(0))
         mask = (batch.is_click * user_matches * causal_mask).to(ad_embeddings.dtype).to(ad_embeddings.device)
         norm_mask = mask / (mask.sum(axis=1).unsqueeze(1) + 1e-16)
+        #history_emb = torch.einsum("ij,jk->ik", norm_mask, ad_embeddings)
         history_emb = torch.einsum("ij,jk->ik", norm_mask, ad_embeddings)
-        x = self.mlp(history_emb)
-        x[torch.norm(history_emb, dim=1) == 0, :] = 0
-        return x
+        #x[torch.norm(history_emb, dim=1) == 0, :] = 0
+        #import pdb; pdb.set_trace()
+        return history_emb
     
 
 class AdEmbedder(nn.Module):
@@ -122,9 +123,7 @@ class TwoTowerModel(nn.Module):
         self.device = device
 
     def dense_grad_parameters(self):
-        if self.use_user_ids:
-            return chain(self.ad_tower.mlp.parameters(), self.user_tower.mlp.parameters())
-        return self.ad_tower.mlp.parameters()
+        return chain(self.ad_tower.mlp.parameters(), self.user_tower.mlp.parameters())
     
     def sparse_grad_parameters(self):
         if self.use_user_ids:
@@ -148,11 +147,15 @@ class TwoTowerModel(nn.Module):
             torch.norm(user_embedding, dim=1) != 0
         )
         #print(f"Forward: {end - start}")
+        #import pdb; pdb.set_trace()
         return batch_loss
 
     def eval_forward(self, batch: InteractionsBatch):
         ad_embedding = self.ad_tower(batch.ad_feats).squeeze(0)
-        user_embedding = self.user_tower(batch, ad_embedding)
+        if self.use_user_ids:
+            user_embedding = self.user_tower(batch).squeeze(0)
+        else:
+            user_embedding = self.user_tower(batch, ad_embedding)
         return (user_embedding[batch.is_eval, :], ad_embedding[batch.is_eval, :])
 
     def ad_forward(self, batch: AdBatch):

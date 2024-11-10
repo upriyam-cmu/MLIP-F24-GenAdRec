@@ -1,6 +1,8 @@
 # %%
 import os
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import argparse
 from taobao_behavior_dataset import TaobaoUserClicksDataset
@@ -24,20 +26,22 @@ print("Using device:", device)
 # %%
 parser = argparse.ArgumentParser()
 parser.add_argument("--run_label", type=str)
-parser.add_argument("--eval_only", action="store_true")
-parser.add_argument("--conditional", action="store_true")
-parser.add_argument("--residual", action="store_true")
-parser.add_argument("--user_feats", action="store_true")
+parser.add_argument("--discriminator_loss_weight", type=float, default=0)
+parser.add_argument("--loopback_loss_weight", type=float, default=0)
 
 args = parser.parse_args()
 run_label = args.run_label
-eval_only = args.eval_only
-conditional = args.conditional
-residual = args.residual
-user_feats = args.user_feats
+discriminator_loss_weight = args.discriminator_loss_weight
+loopback_loss_weight = args.loopback_loss_weight
+
+conditional = True
+residual = False
+user_feats = False
+use_discriminator_loss = discriminator_loss_weight > 0
+use_loopback_loss = loopback_loss_weight > 0
 
 # %%
-batch_size = 2048
+batch_size = 384
 learning_rate = 0.001
 train_epochs = 30
 eval_every_n = 1
@@ -55,8 +59,6 @@ dataset_params = {
     "ad_features": ["cate_id", "brand", "customer", "campaign_id"],
 }
 train_dataset = TaobaoUserClicksDataset(training=True, **dataset_params)
-if eval_only:
-    dataset_params['include_ad_ids'] = True
 test_dataset = TaobaoUserClicksDataset(training=False, **dataset_params)
 
 # %%
@@ -75,48 +77,31 @@ model = AdFeaturesPredictor(
 )
 
 # %%
-if eval_only:
-    reduction_tracker = ReductionTracker(test_dataset.ad_features)
-    
-    model.load_state_dict(torch.load(os.path.join(model_dir, "best_model.pth"))['model_state_dict'])
-    model.eval()
-    with torch.inference_mode(), tqdm(test_dataloader) as pbar:
-        n_users = 0
-        ndcg_scores = []
-        for user_data, ads_features, ads_masks, _, _ in pbar:
-            n_users += user_data.shape[0]
-            
-            user_data = user_data.to(device)
-            ads_features = ads_features.to(device)
-            ads_masks = [None] + [mask.to(device) for mask in ads_masks]
+# aux loss models
+if use_discriminator_loss:
+    embed_size = model.embedder.output_size
+    discriminator = nn.Sequential(
+        nn.Linear(embed_size, 128),
+        nn.ReLU(),
+        nn.Linear(128, 64),
+        nn.ReLU(),
+        nn.Linear(64, 1),
+    )
+    discriminator.to(device)
+    discriminator_optimizer = AdamW(discriminator.parameters(), lr=learning_rate, maximize=True)
 
-            ad_feature_logits = *model(user_data), ads_features[:, 0]
-            for d_cat, d_brand, d_cust, d_camp, target_ad_id in zip(*ad_feature_logits):
-                category_freqs = FrequencyTracker.from_softmax_distribution(d_cat.exp())
-                brand_freqs = FrequencyTracker.from_softmax_distribution(d_brand.exp())
-                customer_freqs = FrequencyTracker.from_softmax_distribution(d_cust.exp())
-                campaign_freqs = FrequencyTracker.from_softmax_distribution(d_camp.exp())
-
-                score_util = ScoreUtil(
-                    reduction_tracker=reduction_tracker,
-                    category_freqs=category_freqs,
-                    brand_freqs=brand_freqs,
-                    customer_freqs=customer_freqs,
-                    campaign_freqs=campaign_freqs,
-                )
-                
-                ndcg_scores.append(compute_ndcg(
-                    score_util,
-                    target_ad_id=target_ad_id.item(),
-                    subsampling=1 / 20,
-                    verbose=False,
-                    use_tqdm=True,
-                ))
-
-                if len(ndcg_scores) > 60:
-                    print(run_label, np.mean(ndcg_scores))
-                    exit(0)
-
+if use_loopback_loss:
+    distr_dim_size = sum(train_dataset.output_dims)
+    embed_size = model.embedder.output_size
+    loopback_model = nn.Sequential(
+        nn.Linear(distr_dim_size, 64),
+        nn.ReLU(),
+        nn.Linear(64, 128),
+        nn.ReLU(),
+        nn.Linear(128, embed_size),
+    )
+    loopback_model.to(device)
+    loopback_model_optimizer = AdamW(loopback_model.parameters(), lr=learning_rate)
 
 # %%
 loss_fn = MaskedCrossEntropyLoss()
@@ -161,8 +146,56 @@ else:
         epoch_train_loss_curve = state_dicts['epoch_loss_curves']
 
 # %%
+def compute_loss(user_data, ads_features, ads_masks):
+    user_embeddings = model.embed(user_data)
+    ad_feature_logits = model.sample(user_embeddings)
+    loss = loss_fn(
+        logits=ad_feature_logits,
+        logit_masks=ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
+        targets=ads_features,
+        penalize_masked=False,
+    )
+
+    if use_discriminator_loss or use_loopback_loss:
+        b_sz = len(user_data)
+        batch_inds = torch.arange(b_sz).to(device)
+        modified_indices = torch.tensor(np.random.choice(user_embeddings.shape[-1], size=b_sz), dtype=int).to(device)
+        replacement_inds = np.random.choice(b_sz - 1, size=b_sz)
+        replacement_inds += (replacement_inds >= np.arange(b_sz))
+        replacement_inds = torch.tensor(replacement_inds, dtype=int).to(device)
+        modified_user_embeddings = user_embeddings.detach().clone()
+        modified_user_embeddings[batch_inds, modified_indices] = modified_user_embeddings[replacement_inds, modified_indices]
+
+    discriminator_gain = 0
+    if use_discriminator_loss:
+        true_embeds = discriminator(user_embeddings).mean()
+        fake_embeds = discriminator(modified_user_embeddings).mean()
+        discriminator_gain = true_embeds - fake_embeds
+
+    loopback_loss = 0
+    if use_loopback_loss:
+        modified_logits = model.sample(modified_user_embeddings)
+        modified_logits = [F.softmax(logits, dim=-1) for logits in modified_logits]
+        modified_logits = torch.cat(modified_logits, dim=-1)
+
+        pred_modified_logits = loopback_model(modified_logits)
+
+        target_values = modified_user_embeddings[batch_inds, modified_indices]
+        predicted_values = pred_modified_logits[batch_inds, modified_indices]
+
+        loopback_loss = ((target_values - predicted_values) ** 2).mean()
+
+    total_loss = loss + discriminator_loss_weight * discriminator_gain + loopback_loss_weight * loopback_loss
+    return total_loss, loss
+
+# %%
 for epoch in range(start_epoch, train_epochs):
     model.train()
+    if use_discriminator_loss:
+        discriminator.train()
+    if use_loopback_loss:
+        loopback_model.train()
+
     with tqdm(train_dataloader, desc=f'Epoch {epoch}') as pbar:
         train_losses = []
         for user_data, ads_features, ads_masks, _, _ in pbar:
@@ -174,40 +207,57 @@ for epoch in range(start_epoch, train_epochs):
                 ads_masks = [None] * (len(ads_masks)+1)
             
             optimizer.zero_grad()
-            ad_feature_logits = model(user_data)
-            loss = loss_fn(
-                logits = ad_feature_logits,
-                logit_masks = ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
-                targets = ads_features
-            )
-            loss.backward()
+            if use_discriminator_loss:
+                discriminator_optimizer.zero_grad()
+            if use_loopback_loss:
+                loopback_model_optimizer.zero_grad()
+
+            total_loss, model_loss = compute_loss(user_data=user_data, ads_features=ads_features, ads_masks=ads_masks)
+            total_loss.backward()
+
             optimizer.step()
-            train_losses.append(loss.item())
-            pbar.set_postfix({'Loss': loss.item()})
+            if use_discriminator_loss:
+                discriminator_optimizer.step()
+            if use_loopback_loss:
+                loopback_model_optimizer.step()
+
+            # bookkeeping
+            train_losses.append(total_loss.item())
+            pbar.set_postfix({'Total Loss': total_loss.item(), 'Model Loss': model_loss.item()})
         train_loss_per_epoch.append(np.mean(train_losses))
         epoch_train_loss_curve.append(train_losses)
 
     if epoch % eval_every_n == 0:
         model.eval()
-        with torch.no_grad():
-            total_loss = 0
-            with tqdm(test_dataloader) as pbar:
+        if use_discriminator_loss:
+            discriminator.eval()
+        if use_loopback_loss:
+            loopback_model.eval()
+
+        with torch.inference_mode():
+            total_loss, total_model_loss = 0, 0
+            with tqdm(test_dataloader, desc='EVAL') as pbar:
                 batches = 0
                 for user_data, ads_features, ads_masks, _, _ in pbar:
                     user_data = user_data.to(device)
                     ads_features = ads_features.to(device)
-                    ads_masks = [None] + [mask.to(device) for mask in ads_masks]
+                    if conditional:
+                        ads_masks = [None] + [mask.to(device) for mask in ads_masks]
+                    else:
+                        ads_masks = [None] * (len(ads_masks)+1)
 
-                    ad_feature_logits = model(user_data)
-                    loss = loss_fn(
-                        logits = ad_feature_logits,
-                        logit_masks = ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
-                        targets = ads_features,
-                        penalize_masked = False
-                    )
+                    # ad_feature_logits = model(user_data)
+                    # loss = loss_fn(
+                    #     logits = ad_feature_logits,
+                    #     logit_masks = ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
+                    #     targets = ads_features
+                    # )
+                    loss, model_loss = compute_loss(user_data=user_data, ads_features=ads_features, ads_masks=ads_masks)
+
                     total_loss += loss.item()
+                    total_model_loss += model_loss.item()
                     batches += 1
-                    pbar.set_postfix({'Loss': total_loss / batches})
+                    pbar.set_postfix({'Total Loss': total_loss / batches, 'Model Loss': model_loss / batches})
 
             val_loss = total_loss / batches
             test_loss_per_epoch.append(val_loss)
