@@ -38,6 +38,28 @@ class FrequencyTracker:
         return ret
 
 
+class OptimizedFrequencyTracker(FrequencyTracker):
+    def __init__(self, distribution: np.ndarray, /):
+        self.distribution = distribution
+
+    def count(self, *args, **kwargs):
+        raise NotImplementedError("FrequencyTracker.count(...) not supported on optimized variant")
+
+    def p_normalized(self, candidates, /):
+        freqs = self.distribution[candidates.flatten()] + 1e-15
+        return freqs / freqs.sum()
+
+    @staticmethod
+    def from_softmax_distribution(distribution, /) -> 'OptimizedFrequencyTracker':
+        try:
+            # if its torch, move to numpy
+            distribution = distribution.detach().cpu().numpy()
+        except:
+            pass
+
+        return OptimizedFrequencyTracker(distribution)
+
+
 class ReductionTracker:
     def __init__(self, all_ad_data):
         self._inter_cache, self._ret_cache = {}, {}
@@ -146,7 +168,7 @@ def compute_ndcg(
         subsampling = int(round(len(ad_data) * subsampling))
     if isinstance(subsampling, int):
         subsampling = int(np.clip(subsampling, 0, len(ad_data)))
-    assert isinstance(subsampling, int) and 0 < subsampling < len(ad_data)
+    assert isinstance(subsampling, int) and 0 < subsampling <= len(ad_data)
 
     random_subsample = ad_data[:subsampling]
     if use_tqdm:

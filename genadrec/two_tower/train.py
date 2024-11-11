@@ -2,8 +2,10 @@ import os
 import json
 import numpy as np
 import torch
-from torch.nn import Module
+from dataset.interactions import CategoricalFeature
 from dataset.interactions import InteractionsDataset
+from enum import Enum
+from torch.nn import Module
 from torch.utils.data import BatchSampler
 from torch.utils.data import DataLoader
 from torch.utils.data import RandomSampler
@@ -13,6 +15,9 @@ from torch.optim import SparseAdam
 from tqdm import tqdm
 from typing import NamedTuple
 from typing import Optional
+from typing import List
+from sequence_model.model import RNNSeqModel
+from simple_ML_baseline.taobao_behavior_dataset import TaobaoDataset
 
 
 class LoadedCheckpoint(NamedTuple):
@@ -21,8 +26,14 @@ class LoadedCheckpoint(NamedTuple):
     sparse_optimizer: Module
 
 
+class ModelType(Enum):
+    TWO_TOWER = 1
+    SEQ = 2
+
+
 class Trainer:
     def __init__(self,
+                 model_type: ModelType,
                  train_epochs: int = 100,
                  train_batch_size: int = 32,
                  eval_batch_size: int = 64,
@@ -31,10 +42,12 @@ class Trainer:
                  train_eval_every_n: int = 1,
                  save_model_every_n: int = 5,
                  max_grad_norm: int = 1,
+                 embedder_hidden_dims: Optional[List[int]] = [1024, 512, 128],
                  force_dataset_reload: bool = False,
                  checkpoint_path: Optional[str] = None,
                  save_dir_root: str = "out/"
     ):
+        self.model_type = model_type
         self.train_epochs = train_epochs
         self.batch_size = train_batch_size
         self.eval_batch_size = eval_batch_size
@@ -43,6 +56,7 @@ class Trainer:
         self.max_grad_norm = max_grad_norm
         self.train_eval_every_n = train_eval_every_n
         self.save_model_every_n = save_model_every_n
+        self.embedder_hidden_dims = embedder_hidden_dims
         self.force_dataset_reload = force_dataset_reload
         self.checkpoint_path = checkpoint_path
         self.save_dir_root = save_dir_root
@@ -55,21 +69,66 @@ class Trainer:
             device = 'cpu'
         self.device = torch.device(device)
 
-        self._init_dataset()
+        self._init()
 
-    def _init_dataset(self):
-        self.train_dataset = InteractionsDataset(
-            path="data/",
-            is_train=True,
-            force_reload=self.force_dataset_reload
-        )
+    def _init(self):
+        if self.model_type == ModelType.TWO_TOWER:
+            self.train_dataset = InteractionsDataset(
+                path="data/",
+                is_train=True,
+                force_reload=self.force_dataset_reload
+            )
+
+            sampler = BatchSampler(RandomSampler(self.train_dataset), self.batch_size, False)
+            self.train_dataloader = DataLoader(self.train_dataset, sampler=sampler, batch_size=None)
+            
+            self.eval_dataset = InteractionsDataset(
+                path="data/",
+                is_train=False,
+                force_reload=self.force_dataset_reload
+            )
+
+            sampler = BatchSampler(RandomSampler(self.eval_dataset), self.eval_batch_size, False)
+            self.eval_dataloader = DataLoader(self.eval_dataset, sampler=sampler, batch_size=None)
+
+            self.model = TwoTowerModel(
+                ads_categorical_features=self.train_dataset.categorical_features, 
+                ads_hidden_dims=self.embedder_hidden_dims, 
+                n_users=self.train_dataset.n_users, 
+                embedding_dim=self.embedding_dim, 
+                use_user_ids=True, 
+                device=self.device
+            )
         
-        self.eval_dataset = InteractionsDataset(
-            path="data/",
-            is_train=False,
-            force_reload=self.force_dataset_reload
-        )
-    
+        elif self.model_type == ModelType.SEQ:
+            self.taobao_dataset = TaobaoDataset(
+                data_dir="data",
+                min_ad_clicks=5,
+                mode="finetune",
+                sequence_mode=True,
+                user_features=["user"],  # ["user", "gender", "age", "shopping", "occupation"],
+                ad_features=["adgroup"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
+                conditional_masking=False
+            )
+
+            sampler = BatchSampler(RandomSampler(self.taobao_dataset), self.batch_size, False)
+            self.train_dataloader = DataLoader(self.taobao_dataset, sampler=sampler, batch_size=None)
+            batch = next(iter(self.train_dataloader))
+            model = RNNSeqModel(
+                n_users=self.taobao_dataset.n_users,
+                ad_categorical_feats=[CategoricalFeature("adgroup_id", self.taobao_dataset.n_ads)],
+                cell_type="LSTM",
+                rnn_input_size=self.embedding_dim,
+                rnn_hidden_size=self.embedding_dim,
+                device=self.device,
+                embedder_hidden_dims=self.embedder_hidden_dims,
+                rnn_batch_first=True
+            )
+            model(batch)
+            import pdb; pdb.set_trace()
+        else:
+            raise Exception(f"Unsupported model type {self.model_type}")
+
     def from_pretrained(self,
                         path: str,
                         model: Module = None,
@@ -77,7 +136,7 @@ class Trainer:
                         sparse_optimizer: Module = None) -> LoadedCheckpoint:
         state = torch.load(path)
         if model is None:
-            model = TwoTowerModel(ads_categorical_features=self.train_dataset.categorical_features, ads_hidden_dims=[1024, 512, 128], n_users=self.train_dataset.n_users, embedding_dim=self.embedding_dim, use_user_ids=True, device=self.device)
+            model = TwoTowerModel(ads_categorical_features=self.train_dataset.categorical_features, ads_hidden_dims=self.embedder_hidden_dims, n_users=self.train_dataset.n_users, embedding_dim=self.embedding_dim, use_user_ids=True, device=self.device)
         
         model.load_state_dict(state["model"])
         if optimizer is not None:
@@ -88,10 +147,6 @@ class Trainer:
         return LoadedCheckpoint(model=model, optimizer=optimizer, sparse_optimizer=sparse_optimizer)
 
     def train(self):
-        sampler = BatchSampler(RandomSampler(self.train_dataset), self.batch_size, False)
-        train_dataloader = DataLoader(self.train_dataset, sampler=sampler, batch_size=None)
-
-        self.model = TwoTowerModel(ads_categorical_features=self.train_dataset.categorical_features, ads_hidden_dims=[1024, 512, 128], n_users=self.train_dataset.n_users, embedding_dim=self.embedding_dim, use_user_ids=True, device=self.device)
 
         optimizer = AdamW(self.model.dense_grad_parameters(), lr=self.learning_rate)
         sparse_optimizer = SparseAdam(self.model.sparse_grad_parameters(), lr=self.learning_rate)
@@ -109,7 +164,7 @@ class Trainer:
         for epoch in range(self.train_epochs):
             self.model.train()
             training_losses = []
-            with tqdm(train_dataloader, desc=f'Epoch {epoch+1}') as pbar:
+            with tqdm(self.train_dataloader, desc=f'Epoch {epoch+1}') as pbar:
                 for batch in pbar:
                     model_loss = self.model(batch)
                     
@@ -154,13 +209,11 @@ class Trainer:
             checkpoint = self.from_pretrained(self.checkpoint_path)
             model = checkpoint.model
 
-        sampler = BatchSampler(RandomSampler(self.eval_dataset), self.eval_batch_size, False)
-        eval_dataloader = DataLoader(self.eval_dataset, sampler=sampler, batch_size=None)
         eval_index = self.eval_dataset.get_index()
 
         metrics = None
         index_emb = self.model.ad_forward(eval_index)
-        with tqdm(eval_dataloader, desc='Eval') as pbar:
+        with tqdm(self.eval_dataloader, desc='Eval') as pbar:
             for batch in pbar:
                 user_emb, target_emb = model.eval_forward(batch)
                 
@@ -197,6 +250,7 @@ def accumulate_metrics(query, target, index, ks, metrics=None):
 
 if __name__ == "__main__":
     trainer = Trainer(
+        model_type=ModelType.SEQ,
         learning_rate=0.0005,
         eval_batch_size=256,
         train_batch_size=32,

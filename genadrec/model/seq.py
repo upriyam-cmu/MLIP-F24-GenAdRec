@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
+from model.mlp import L2NormalizationLayer
 from minGRU_pytorch import minGRU as minGRU_impl
 
 
@@ -32,7 +33,7 @@ _rnn_cell_options = {
 
 
 class RNN(nn.Module):
-    def __init__(self, cell_type: str, input_size, hidden_size, batch_first=True) -> None:
+    def __init__(self, cell_type: str, input_size, hidden_size, normalize=False, batch_first=True) -> None:
         super().__init__()
 
         if cell_type not in _rnn_cell_options:
@@ -44,10 +45,16 @@ class RNN(nn.Module):
             batch_first=batch_first,
         )
 
+        if normalize:
+            self.norm = L2NormalizationLayer(dim=-1)
+        self.normalize = normalize
+
         self.hidden_state = None
 
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
-        y, self.hidden_state = self.cell(X, self.hidden_state)
+    def forward(self, X: torch.Tensor, h: torch.Tensor = None) -> torch.Tensor:
+        y, self.hidden_state = self.cell(X, h)
+        if self.normalize:
+            y = self.norm(y)
         return y
 
     def reset(self) -> None:
