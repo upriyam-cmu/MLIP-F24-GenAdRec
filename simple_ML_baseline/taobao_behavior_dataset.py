@@ -9,6 +9,7 @@ from typing import NamedTuple
 
 class AdBatch(NamedTuple):
     adgroup_id: np.array
+    rel_ad_freqs: np.array
 
 
 class UserBatch(NamedTuple):
@@ -61,7 +62,7 @@ class TaobaoDataset(Dataset):
             train_data.select(self.ad_feats).unique(),
             test_data.select(self.ad_feats).unique(),
         ]).unique()
-        self.ad_encoder = OrdinalEncoder(dtype=np.uint32, encoded_missing_value=-1).fit(self.ad_feature)
+        self.ad_encoder = OrdinalEncoder(dtype=np.int32, encoded_missing_value=-1).fit(self.ad_feature)
         self.ad_encoder.set_output(transform="polars")
 
         self.input_dims = [user.shape[0] for user in self.user_encoder.categories_]
@@ -97,11 +98,13 @@ class TaobaoDataset(Dataset):
         self.user_data = self.user_encoder.transform(self.raw_data.select(self.user_feats))
         self.ads_data = self.ad_encoder.transform(self.raw_data.select(self.ad_feats))
         
-        self.interaction_mapping = {0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
-        self.interaction_data = self.raw_data.select("btag")
-        self.timestamps = self.raw_data.select("timestamp")
+        self.interaction_mapping = {-1: "non_ad_click", 0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
+        self.interaction_data = self.raw_data.select("btag", "timestamp")
         
-        self.transformed_data = pl.concat([self.user_data, self.ads_data, self.interaction_data, self.timestamps], how="horizontal")
+        self.transformed_data = (pl
+            .concat([self.user_data, self.ads_data, self.interaction_data], how="horizontal")
+            .select(pl.all(), rel_ad_freq = pl.len().over("adgroup") / len(self.interaction_data))
+        )
 
         if sequence_mode:
             user_features.remove("user")
@@ -110,7 +113,7 @@ class TaobaoDataset(Dataset):
                 .group_by("user", maintain_order=True)
                 .agg(
                     pl.col(user_features).first(), 
-                    pl.col(*self.ad_feats, "btag", "timestamp"), 
+                    pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp"), 
                     seq_len=pl.col("btag").len()
                 )
             )
@@ -121,16 +124,14 @@ class TaobaoDataset(Dataset):
                     pl.col(self.user_feats),
                     *(pl.col(feat).list.concat(
                         pl.lit(0, dtype=pl.UInt32).repeat_by(pl.col("pad_len"))
-                    ).list.to_array(max_seq_len) for feat in [*self.ad_feats, "btag", "timestamp"]),
+                    ).list.to_array(max_seq_len) for feat in [*self.ad_feats, "rel_ad_freq", "btag", "timestamp"]),
                     padded_mask = pl.lit(False).repeat_by(pl.col("seq_len")).list.concat(
                         pl.lit(True).repeat_by(pl.col("pad_len"))
                     ).list.to_array(max_seq_len)
                 )
             )
             self.user_data = self.sequence_data.select(self.user_feats).to_numpy().squeeze()
-            self.ads_data = [self.sequence_data.select(feat).to_series().to_numpy() for feat in self.ad_feats]
-            if len(self.ad_feats) == 1:
-                self.ads_data = self.ads_data[0]
+            self.ads_data = [self.sequence_data.select(feat).to_series().to_numpy() for feat in (*self.ad_feats, "rel_ad_freq")]
             self.interaction_data = self.sequence_data.select("btag").to_series().to_numpy()
             self.timestamps = self.sequence_data.select("timestamp").to_series().to_numpy()
             self.padded_masks = self.sequence_data.select("padded_mask").to_series().to_numpy()
@@ -159,7 +160,7 @@ class TaobaoDataset(Dataset):
             max_batch_len = (~self.padded_masks[idx]).sum(axis=1).max()
             return TaobaoInteractionsSeqBatch(
                 UserBatch(self.user_data[idx].astype(np.int32)),
-                AdBatch(*([ads_feat[idx, :max_batch_len].astype(np.int32) for ads_feat in self.ads_data] if len(self.ad_feats) > 1 else [self.ads_data[idx, :max_batch_len].astype(np.int32)])),
+                AdBatch(*([ads_feat[idx, :max_batch_len] for ads_feat in self.ads_data])), # if len(self.ad_feats) > 1 else [self.ads_data[idx, :max_batch_len].astype(np.int32)])),
                 self.interaction_data[idx, :max_batch_len],
                 self.timestamps[idx, :max_batch_len].astype(np.int32),
                 self.padded_masks[idx, :max_batch_len]
