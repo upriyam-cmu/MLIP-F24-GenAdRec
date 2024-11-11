@@ -87,28 +87,31 @@ class TaobaoDataset(Dataset):
                 self.conditional_mappings.append(conditional_map.to_dict()[self.ad_feats[i]])
         
         if mode == "pretrain":
-            self.raw_data = train_data.filter(pl.col("adgroup").is_null())
+            raw_data = train_data.filter(pl.col("adgroup").is_null())
         elif mode == "finetune":
-            self.raw_data = train_data.drop_nulls("adgroup")
+            raw_data = train_data.drop_nulls("adgroup")
         elif mode == "train":
-            self.raw_data = train_data
+            raw_data = train_data
         elif mode == "test":
-            self.raw_data = test_data
-            
-        self.user_data = self.user_encoder.transform(self.raw_data.select(self.user_feats))
-        self.ads_data = self.ad_encoder.transform(self.raw_data.select(self.ad_feats))
+            raw_data = pl.concat([
+                train_data.drop_nulls("adgroup"),
+                test_data,
+            ])
+
+        self.user_data = self.user_encoder.transform(raw_data.select(self.user_feats))
+        self.ads_data = self.ad_encoder.transform(raw_data.select(self.ad_feats))
         
         self.interaction_mapping = {-1: "non_ad_click", 0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
-        self.interaction_data = self.raw_data.select("btag", "timestamp")
+        self.interaction_data = raw_data.select("btag", "timestamp")
         
-        self.transformed_data = (pl
+        transformed_data = (pl
             .concat([self.user_data, self.ads_data, self.interaction_data], how="horizontal")
             .select(pl.all(), rel_ad_freq = pl.len().over("adgroup") / len(self.interaction_data))
         )
 
         if sequence_mode:
             user_features.remove("user")
-            sequences = (self.transformed_data
+            sequences = (transformed_data
                 .sort("user", "timestamp")
                 .group_by("user", maintain_order=True)
                 .agg(
@@ -141,16 +144,18 @@ class TaobaoDataset(Dataset):
             self.interaction_data = self.interaction_data.to_series().to_numpy()
             self.timestamps = self.timestamps.to_series().to_numpy()
         
+        del transformed_data
+        del raw_data
         del train_data
         del test_data
     
     @cached_property
     def n_users(self):
-        return self.transformed_data["user"].max()+1
+        return self.user_profile["user"].max()+1
 
     @cached_property
     def n_ads(self):
-        return self.transformed_data["adgroup"].max()+1
+        return self.ad_feature["adgroup"].max()+1
     
     def __len__(self):
         return len(self.timestamps)
