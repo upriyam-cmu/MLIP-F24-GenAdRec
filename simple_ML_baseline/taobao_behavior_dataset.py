@@ -156,12 +156,13 @@ class TaobaoDataset(Dataset):
     
     def __getitem__(self, idx):
         if self.sequence_mode:
+            max_batch_len = (~self.padded_masks[idx]).sum(axis=1).max()
             return TaobaoInteractionsSeqBatch(
                 UserBatch(self.user_data[idx].astype(np.int32)),
-                AdBatch(*([ads_feat[idx].astype(np.int32) for ads_feat in self.ads_data] if len(self.ad_feats) > 1 else [self.ads_data[idx].astype(np.int32)])),
-                self.interaction_data[idx],
-                self.timestamps[idx],
-                self.padded_masks[idx]
+                AdBatch(*([ads_feat[idx, :max_batch_len].astype(np.int32) for ads_feat in self.ads_data] if len(self.ad_feats) > 1 else [self.ads_data[idx, :max_batch_len].astype(np.int32)])),
+                self.interaction_data[idx, :max_batch_len],
+                self.timestamps[idx, :max_batch_len].astype(np.int32),
+                self.padded_masks[idx, :max_batch_len]
             )
         else:
             user_data, ads_data, timestamps, interactions = self.user_data[idx], self.ads_data[idx], self.timestamps[idx], self.interaction_data[idx]

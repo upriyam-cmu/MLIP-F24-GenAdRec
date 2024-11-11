@@ -1,28 +1,12 @@
 import torch
 from dataset.interactions import AdBatch
-from dataset.interactions import CategoricalFeature
 from dataset.interactions import InteractionsBatch
-from embedding.ads import AdEmbedder
+from embedding.ads import AdTower
 from embedding.user import UserIdTower
 from embedding.user import UserHistoryTower
 from itertools import chain
-from model.mlp import build_mlp
 from torch import nn
 from two_tower.loss import SampledSoftmaxLoss
-from typing import Iterable
-
-
-class AdTower(nn.Module):
-    def __init__(self, categorical_features: Iterable[CategoricalFeature], embedding_dim, hidden_dims, device):
-        super().__init__()
-        self.device = device
-        self.ad_embedder = AdEmbedder(categorical_features, embedding_dim, device=device)
-        self.mlp = build_mlp(self.ad_embedder.out_dim, hidden_dims, embedding_dim).to(self.device)
-    
-    def forward(self, batch: AdBatch):
-        emb = self.ad_embedder(batch)
-        x = self.mlp(emb)
-        return x
 
 
 class TwoTowerModel(nn.Module):

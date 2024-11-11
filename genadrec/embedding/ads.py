@@ -1,6 +1,7 @@
 import torch
 from dataset.interactions import AdBatch
 from dataset.interactions import CategoricalFeature
+from model.mlp import build_mlp
 from torch import nn
 from typing import Iterable
 
@@ -31,3 +32,16 @@ class AdEmbedder(nn.Module):
             if feat in self.embedding_modules.keys():
                 x.append(self.embedding_modules[feat](id.to(torch.int32).to(self.device)))
         return torch.cat(x, axis=-1)
+
+
+class AdTower(nn.Module):
+    def __init__(self, categorical_features: Iterable[CategoricalFeature], embedding_dim, hidden_dims, device):
+        super().__init__()
+        self.device = device
+        self.ad_embedder = AdEmbedder(categorical_features, embedding_dim, device=device)
+        self.mlp = build_mlp(self.ad_embedder.out_dim, hidden_dims, embedding_dim).to(self.device)
+    
+    def forward(self, batch: AdBatch):
+        emb = self.ad_embedder(batch)
+        x = self.mlp(emb)
+        return x
