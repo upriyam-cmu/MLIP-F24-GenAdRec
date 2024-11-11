@@ -1,28 +1,8 @@
 import os
 import numpy as np
 import polars as pl
-from functools import cached_property
 from sklearn.preprocessing import OrdinalEncoder
 from torch.utils.data.dataset import Dataset
-from typing import NamedTuple
-
-
-class AdBatch(NamedTuple):
-    adgroup_id: np.array
-    rel_ad_freqs: np.array
-
-
-class UserBatch(NamedTuple):
-    user: np.array
-
-
-class TaobaoInteractionsSeqBatch(NamedTuple):
-    user_feats: UserBatch
-    ad_feats: np.array
-    is_click: np.array
-    timestamp: np.array
-    is_padding: np.array
-
 
 class TaobaoDataset(Dataset):
 
@@ -35,7 +15,6 @@ class TaobaoDataset(Dataset):
         conditional_masking = False    # maps ad feature tuples to next feature subset in same order as provided
     ):
         assert mode in ["pretrain", "finetune", "train", "test"], "mode must be pretrain, finetune, train, or test"
-<<<<<<<< HEAD:simple_ML_baseline/taobao_simple_dataset.py
         assert not (conditional_masking and sequence_mode), "Can only support one of conditional_masking and sequence_mode at a time"
 
         dataset_params = f"{min_train_clks}_min_train_clks-{num_test_clks}_test_clks"
@@ -58,12 +37,6 @@ class TaobaoDataset(Dataset):
         
         self.mode = mode
         self.interaction_mapping = {-1: "ad_non_click" ,0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
-========
-        assert not (conditional_masking and sequence_mode), "Can only support one of conditional masking and sequence mode at a time"
-        assert "user" in user_features, f"Missing user id in user features: {user_features}"
-        assert "adgroup" in ad_features, f"Missing ad id in ad features: {ad_features}"
-        
->>>>>>>> 241deafc84a29bf52ccdfc09a2c795033e356bd2:simple_ML_baseline/taobao_behavior_dataset.py
         self.conditional_masking = conditional_masking
         self.sequence_mode = sequence_mode
         
@@ -76,14 +49,7 @@ class TaobaoDataset(Dataset):
         self.user_encoder.set_output(transform="polars")
 
         self.ad_feats = list(ad_features)
-<<<<<<<< HEAD:simple_ML_baseline/taobao_simple_dataset.py
         self.ad_feature = pl.read_parquet(ad_feature_parquet).select(self.ad_feats).unique()
-========
-        self.ad_feature = pl.concat([
-            train_data.select(self.ad_feats).unique(),
-            test_data.select(self.ad_feats).unique(),
-        ]).unique()
->>>>>>>> 241deafc84a29bf52ccdfc09a2c795033e356bd2:simple_ML_baseline/taobao_behavior_dataset.py
         self.ad_encoder = OrdinalEncoder(dtype=np.int32, encoded_missing_value=-1).fit(self.ad_feature)
         self.ad_encoder.set_output(transform="polars")
 
@@ -116,22 +82,7 @@ class TaobaoDataset(Dataset):
         elif mode == "train":
             raw_data = train_data
         elif mode == "test":
-<<<<<<<< HEAD:simple_ML_baseline/taobao_simple_dataset.py
             raw_data = test_data
-========
-            self.raw_data = test_data
-            
-        self.user_data = self.user_encoder.transform(self.raw_data.select(self.user_feats))
-        self.ads_data = self.ad_encoder.transform(self.raw_data.select(self.ad_feats))
-        
-        self.interaction_mapping = {-1: "non_ad_click", 0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
-        self.interaction_data = self.raw_data.select("btag", "timestamp")
-        
-        self.transformed_data = (pl
-            .concat([self.user_data, self.ads_data, self.interaction_data], how="horizontal")
-            .select(pl.all(), rel_ad_freq = pl.len().over("adgroup") / len(self.interaction_data))
-        )
->>>>>>>> 241deafc84a29bf52ccdfc09a2c795033e356bd2:simple_ML_baseline/taobao_behavior_dataset.py
 
         if sequence_mode:
             user_features.remove("user")
@@ -140,7 +91,7 @@ class TaobaoDataset(Dataset):
                 .group_by("user", maintain_order=True)
                 .agg(
                     pl.col(user_features).first(), 
-                    pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp"), 
+                    pl.col(*self.ad_feats, "btag", "timestamp"), 
                     seq_len=pl.col("btag").len()
                 )
             )
@@ -151,13 +102,12 @@ class TaobaoDataset(Dataset):
                     pl.col(self.user_feats),
                     *(pl.col(feat).list.concat(
                         pl.lit(0, dtype=pl.UInt32).repeat_by(pl.col("pad_len"))
-                    ).list.to_array(max_seq_len) for feat in [*self.ad_feats, "rel_ad_freq", "btag", "timestamp"]),
+                    ).list.to_array(max_seq_len) for feat in [*self.ad_feats, "btag", "timestamp"]),
                     padded_mask = pl.lit(False).repeat_by(pl.col("seq_len")).list.concat(
                         pl.lit(True).repeat_by(pl.col("pad_len"))
                     ).list.to_array(max_seq_len)
                 )
             )
-<<<<<<<< HEAD:simple_ML_baseline/taobao_simple_dataset.py
             self.user_data = self.sequence_data.select(self.user_feats).to_numpy().squeeze().astype(np.int64)
             self.ads_data = [self.sequence_data.select(feat).to_series().to_numpy().astype(np.int64) for feat in self.ad_feats]
             if len(self.ad_feats) == 1:
@@ -165,13 +115,6 @@ class TaobaoDataset(Dataset):
             self.interaction_data = self.sequence_data.select("btag").to_series().to_numpy().astype(np.int32)
             self.timestamps = self.sequence_data.select("timestamp").to_series().to_numpy().astype(np.int32)
             self.padded_masks = self.sequence_data.select("padded_mask").to_series().to_numpy().astype(bool)
-========
-            self.user_data = self.sequence_data.select(self.user_feats).to_numpy().squeeze()
-            self.ads_data = [self.sequence_data.select(feat).to_series().to_numpy() for feat in (*self.ad_feats, "rel_ad_freq")]
-            self.interaction_data = self.sequence_data.select("btag").to_series().to_numpy()
-            self.timestamps = self.sequence_data.select("timestamp").to_series().to_numpy()
-            self.padded_masks = self.sequence_data.select("padded_mask").to_series().to_numpy()
->>>>>>>> 241deafc84a29bf52ccdfc09a2c795033e356bd2:simple_ML_baseline/taobao_behavior_dataset.py
         else:
             self.user_data = raw_data.select(self.user_feats).to_numpy().squeeze().astype(np.int64)
             self.ads_data = raw_data.select(self.ad_feats).to_numpy().squeeze().astype(np.int64)
@@ -182,26 +125,17 @@ class TaobaoDataset(Dataset):
         del train_data
         del test_data
     
-    @cached_property
-    def n_users(self):
-        return self.transformed_data["user"].max()+1
-
-    @cached_property
-    def n_ads(self):
-        return self.transformed_data["adgroup"].max()+1
-    
     def __len__(self):
         return len(self.timestamps)
     
     def __getitem__(self, idx):
         if self.sequence_mode:
-            max_batch_len = (~self.padded_masks[idx]).sum(axis=1).max()
-            return TaobaoInteractionsSeqBatch(
-                UserBatch(self.user_data[idx].astype(np.int32)),
-                AdBatch(*([ads_feat[idx, :max_batch_len] for ads_feat in self.ads_data])), # if len(self.ad_feats) > 1 else [self.ads_data[idx, :max_batch_len].astype(np.int32)])),
-                self.interaction_data[idx, :max_batch_len],
-                self.timestamps[idx, :max_batch_len].astype(np.int32),
-                self.padded_masks[idx, :max_batch_len]
+            return (
+                self.user_data[idx], 
+                [ads_feat[idx] for ads_feat in self.ads_data] if len(self.ad_feats) > 1 else self.ads_data[idx],
+                self.interaction_data[idx], 
+                self.timestamps[idx], 
+                self.padded_masks[idx]
             )
         else:
             user_data, ads_data, timestamps, interactions = self.user_data[idx], self.ads_data[idx], self.timestamps[idx], self.interaction_data[idx]
