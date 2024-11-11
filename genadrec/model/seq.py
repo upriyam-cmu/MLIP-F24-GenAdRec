@@ -46,8 +46,8 @@ class RNN(nn.Module):
 
         self.hidden_state = None
 
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
-        y, self.hidden_state = self.cell(X, self.hidden_state)
+    def forward(self, X: torch.Tensor, h: torch.Tensor = None) -> torch.Tensor:
+        y, self.hidden_state = self.cell(X, h)
         return y
 
     def reset(self) -> None:
