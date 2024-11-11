@@ -9,7 +9,7 @@ from masked_cross_entropy_loss import MaskedCrossEntropyLoss
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from tqdm import tqdm
-from non_ml_baseline.simple_eval import FrequencyTracker, ReductionTracker, ScoreUtil, compute_ndcg
+from non_ml_baseline.simple_eval import OptimizedFrequencyTracker as FrequencyTracker, ReductionTracker, ScoreUtil, compute_ndcg
 
 # %%
 def gen_ads_mask(ads_data, dataset, device):
@@ -36,14 +36,15 @@ print("Using device:", device)
 # %%
 parser = argparse.ArgumentParser()
 parser.add_argument("--run_label", type=str)
-parser.add_argument("--eval_only", action="store_true")
+parser.add_argument("--eval_model_id", type=str, default="")
 parser.add_argument("--conditional", action="store_true")
 parser.add_argument("--residual", action="store_true")
 parser.add_argument("--user_feats", action="store_true")
 
 args = parser.parse_args()
 run_label = args.run_label
-eval_only = args.eval_only
+eval_model_id = args.eval_model_id
+eval_only = eval_model_id != ""
 conditional = args.conditional
 residual = args.residual
 user_feats = args.user_feats
@@ -126,18 +127,29 @@ if eval_only:
                     customer_freqs=customer_freqs,
                     campaign_freqs=campaign_freqs,
                 )
-                
+
                 ndcg_scores.append(compute_ndcg(
                     score_util,
                     target_ad_id=target_ad_id.item(),
-                    subsampling=1 / 20,
+                    subsampling=0.1,
                     verbose=False,
-                    use_tqdm=True,
+                    use_tqdm=False,
                 ))
 
-                if len(ndcg_scores) > 60:
-                    print(run_label, np.mean(ndcg_scores))
-                    exit(0)
+                pbar.set_postfix({'avg NDCG': float(np.mean(ndcg_scores))})
+
+    with open('log.txt', 'a') as log_file:
+        def print_and_log(*args, **kwargs):
+            print(*args, **kwargs)
+            kwargs['file'] = log_file
+            print(*args, **kwargs)
+
+        print_and_log(f"eval results for model: type='{run_label}' id='{eval_model_id}'")
+        print_and_log("Validation Loss:", validation_loss)
+        print_and_log("Avg NDCG:", float(np.mean(ndcg_scores)))
+        print_and_log()
+
+    exit(0)
 
 
 # %%
@@ -246,7 +258,10 @@ for epoch in range(start_epoch, train_epochs):
                 for user_data, ads_features, ads_masks, _, _ in pbar:
                     user_data = user_data.to(device)
                     ads_features = ads_features.to(device)
-                    ads_masks = [None] + [mask.to(device) for mask in ads_masks]
+                    if conditional:
+                        ads_masks = [None] + [mask.to(device) for mask in ads_masks]
+                    else:
+                        ads_masks = [None] * (len(ads_masks) + 1)
 
                     ad_feature_logits = model(user_data)
                     loss = loss_fn(
