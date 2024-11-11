@@ -9,7 +9,7 @@ from masked_cross_entropy_loss import MaskedCrossEntropyLoss
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from tqdm import tqdm
-from non_ml_baseline.simple_eval import FrequencyTracker, ReductionTracker, ScoreUtil, compute_ndcg
+from non_ml_baseline.simple_eval import OptimizedFrequencyTracker as FrequencyTracker, ReductionTracker, ScoreUtil, compute_ndcg
 
 # %%
 def gen_ads_mask(ads_data, dataset, device):
@@ -51,8 +51,6 @@ user_feats = args.user_feats
 # %%
 batch_size = 1024
 learning_rate = 0.001
-pretrain_epochs = 1
-pretrain_save_every = 2000
 train_epochs = 30
 eval_every_n = 1
 save_every_n = 1
@@ -70,11 +68,6 @@ dataset_params = {
     "ad_features": ["cate", "brand", "customer", "campaign"],
     "conditional_masking": True,
 }
-
-# %%
-if pretrain_epochs > 0:
-    pretrain_dataset = TaobaoDataset(mode="pretrain", **dataset_params)
-    pretrain_dataloader = DataLoader(pretrain_dataset, batch_size=batch_size, shuffle=True)
 
 # %%
 train_dataset = TaobaoDataset(mode="finetune", **dataset_params)
@@ -147,6 +140,8 @@ optimizer = AdamW(model.parameters(), lr=learning_rate)
 # %%
 if not os.path.isdir(outputs_dir):
     os.makedirs(outputs_dir)
+if not os.path.isdir(model_dir):
+    os.makedirs(model_dir)
 
 # %%
 start_epoch = 0
@@ -154,10 +149,6 @@ best_val_loss = float('inf')
 train_loss_per_epoch = []
 test_loss_per_epoch = []
 epoch_train_loss_curve = []
-
-# %%
-if not os.path.isdir(model_dir):
-    os.makedirs(model_dir)
 
 # %%
 best_model_path = os.path.join(model_dir, "best_model.pth")
@@ -170,45 +161,6 @@ if os.path.isfile(best_model_path):
     train_loss_per_epoch = state_dicts['train_loss_per_epoch']
     test_loss_per_epoch = state_dicts['test_loss_per_epoch']
     epoch_train_loss_curve = state_dicts['epoch_loss_curves']
-else:
-    for epoch in range(pretrain_epochs):
-        model.train()
-        with tqdm(pretrain_dataloader, desc=f'Pretrain Epoch {epoch}') as pbar:
-            pretrain_losses = []
-            for user_data, ads_features, ads_masks, _, _ in pbar:
-                user_data = user_data.to(device)
-                ads_features = ads_features[:, :2].to(device)
-                if conditional:
-                    ads_masks = [None, ads_masks[0].to(device)]
-                else:
-                    ads_masks = [None, None]
-                
-                optimizer.zero_grad()
-                ad_feature_logits = model(user_data)
-                loss = loss_fn(
-                    logits = ad_feature_logits[:2],
-                    logit_masks = ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
-                    targets = ads_features
-                )
-                loss.backward()
-                optimizer.step()
-                pretrain_losses.append(loss.item())
-                pbar.set_postfix({'Loss': loss.item()})
-                
-                if len(pretrain_losses) % pretrain_save_every == 0:
-                    torch.save({
-                        'epoch': 0,
-                        'model_state_dict': model.state_dict(),
-                        'optimizer_state_dict': optimizer.state_dict(),
-                        'best_val_loss': best_val_loss,
-                        'train_loss_per_epoch': train_loss_per_epoch,
-                        'test_loss_per_epoch': test_loss_per_epoch,
-                        'epoch_loss_curves': [pretrain_losses]
-                    }, os.path.join(model_dir, f'pretrain_{len(pretrain_losses)}.pth'))
-
-            train_loss_per_epoch.append(np.mean(pretrain_losses))
-            epoch_train_loss_curve.append(pretrain_losses)
-
 
 # %%
 for epoch in range(start_epoch, train_epochs):
