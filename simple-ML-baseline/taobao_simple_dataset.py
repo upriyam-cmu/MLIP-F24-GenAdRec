@@ -7,83 +7,86 @@ from torch.utils.data.dataset import Dataset
 class TaobaoDataset(Dataset):
 
     def __init__(
-        self, data_dir, min_ad_clicks, mode = "train", sequence_mode = False,
+        self, data_dir, min_train_clks, num_test_clks, include_ad_non_clks,
+        mode = "train", 
+        sequence_mode = False,
         user_features = ["user", "gender", "age", "shopping", "occupation"],    # all features by default
         ad_features = ["cate", "brand", "customer", "campaign", "adgroup"],     # all features by default
         conditional_masking = False    # maps ad feature tuples to next feature subset in same order as provided
     ):
         assert mode in ["pretrain", "finetune", "train", "test"], "mode must be pretrain, finetune, train, or test"
-        assert not (conditional_masking and sequence_mode), "Can only support one of conditional masking and sequence mode at a time"
+        assert not (conditional_masking and sequence_mode), "Can only support one of conditional_masking and sequence_mode at a time"
+
+        dataset_params = f"{min_train_clks}_min_train_clks-{num_test_clks}_test_clks"
+        if set(["gender", "age", "shopping", "occupation"]).intersection(user_features):
+            dataset_params += "-usr_fts"
+        if set(["cate", "brand", "customer", "campaign"]).intersection(ad_features):
+            dataset_params += "-ad_fts"
+        if include_ad_non_clks:
+            dataset_params += "-non_clks"
+        
+        user_profile_parquet = os.path.join(data_dir, f"user_profile-{dataset_params}.parquet")
+        ad_feature_parquet = os.path.join(data_dir, f"ad_feature-{dataset_params}.parquet")
+        train_parquet = os.path.join(data_dir, f"train-{dataset_params}.parquet")
+        test_parquet = os.path.join(data_dir, f"test-{dataset_params}.parquet")
+        
+        assert os.path.isfile(user_profile_parquet), f"Cannot find user_profile file {user_profile_parquet}. Please generate using data_preprocess_encode.ipynb"
+        assert os.path.isfile(ad_feature_parquet), f"Cannot find ad_feature file {ad_feature_parquet}. Please generate using data_preprocess_encode.ipynb"
+        assert os.path.isfile(train_parquet), f"Cannot find train data file {train_parquet}. Please generate using data_preprocess_encode.ipynb"
+        assert os.path.isfile(test_parquet), f"Cannot find test data file {test_parquet}. Please generate using data_preprocess_encode.ipynb"
+        
+        self.mode = mode
+        self.interaction_mapping = {-1: "ad_non_click" ,0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
         self.conditional_masking = conditional_masking
         self.sequence_mode = sequence_mode
-        
-        train_parquet = os.path.join(data_dir, f"train_min_{min_ad_clicks}_click.parquet")
-        test_parquet = os.path.join(data_dir, f"test_min_{min_ad_clicks}_click.parquet")
-        
-        assert os.path.isfile(train_parquet), f"Cannot find train data file {train_parquet}. Please generate using data_preprocess.ipynb"
-        assert os.path.isfile(test_parquet), f"Cannot find test data file {test_parquet}. Please generate using data_preprocess.ipynb"
         
         train_data = pl.read_parquet(train_parquet)
         test_data = pl.read_parquet(test_parquet)
 
         self.user_feats = list(user_features)
-        self.user_profile = pl.concat([
-            train_data.select(self.user_feats).unique(),
-            test_data.select(self.user_feats).unique(),
-        ]).unique()
+        self.user_profile = pl.read_parquet(user_profile_parquet).select(self.user_feats).unique()
         self.user_encoder = OrdinalEncoder(dtype=np.uint32).fit(self.user_profile)
         self.user_encoder.set_output(transform="polars")
 
         self.ad_feats = list(ad_features)
-        self.ad_feature = pl.concat([
-            train_data.select(self.ad_feats).unique(),
-            test_data.select(self.ad_feats).unique(),
-        ]).unique()
-        self.ad_encoder = OrdinalEncoder(dtype=np.uint32, encoded_missing_value=-1).fit(self.ad_feature)
+        self.ad_feature = pl.read_parquet(ad_feature_parquet).select(self.ad_feats).unique()
+        self.ad_encoder = OrdinalEncoder(dtype=np.int32, encoded_missing_value=-1).fit(self.ad_feature)
         self.ad_encoder.set_output(transform="polars")
 
         self.input_dims = [user.shape[0] for user in self.user_encoder.categories_]
         self.output_dims = [category.shape[0] for category in self.ad_encoder.categories_]
         
         if self.conditional_masking:
-            polars_transformed_ad_feats: pl.DataFrame = self.ad_encoder.transform(self.ad_feature)
-            self.ad_features = polars_transformed_ad_feats.unique().to_numpy()
+            transformed_ad_feature: pl.DataFrame = self.ad_encoder.transform(self.ad_feature)
+            self.ad_features = transformed_ad_feature.unique().to_numpy()
         
             self.conditional_mappings = []
             for i in range(1, len(self.ad_feats)):
                 conditional_map = (
-                    polars_transformed_ad_feats
+                    transformed_ad_feature
                     .select(self.ad_feats[:i+1])
                     .group_by(self.ad_feats[:i])
                     .agg(
                         pl.col(self.ad_feats[i]).unique()
                     )
+                    .select(*self.ad_feats[:i], pl.col(self.ad_feats[i]).list.set_difference([-1]))
                     .to_pandas()
                 )
                 conditional_map.index = list(zip(*[conditional_map[self.ad_feats[j]] for j in range(i)]))
                 self.conditional_mappings.append(conditional_map.to_dict()[self.ad_feats[i]])
         
         if mode == "pretrain":
-            self.raw_data = train_data.filter(pl.col("adgroup").is_null())
+            raw_data = train_data.filter(pl.col("adgroup") == -1)
         elif mode == "finetune":
-            self.raw_data = train_data.drop_nulls("adgroup")
+            raw_data = train_data.filter(pl.col("adgroup") > -1)
         elif mode == "train":
-            self.raw_data = train_data
+            raw_data = train_data
         elif mode == "test":
-            self.raw_data = test_data
-            
-        self.user_data = self.user_encoder.transform(self.raw_data.select(self.user_feats))
-        self.ads_data = self.ad_encoder.transform(self.raw_data.select(self.ad_feats))
-        
-        self.interaction_mapping = {0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
-        self.interaction_data = self.raw_data.select("btag")
-        self.timestamps = self.raw_data.select("timestamp")
-        
-        self.transformed_data = pl.concat([self.user_data, self.ads_data, self.interaction_data, self.timestamps], how="horizontal")
+            raw_data = test_data
 
         if sequence_mode:
             user_features.remove("user")
-            sequences = (self.transformed_data
+            sequences = (raw_data
                 .sort("user", "timestamp")
                 .group_by("user", maintain_order=True)
                 .agg(
@@ -105,19 +108,20 @@ class TaobaoDataset(Dataset):
                     ).list.to_array(max_seq_len)
                 )
             )
-            self.user_data = self.sequence_data.select(self.user_feats).to_numpy().squeeze()
-            self.ads_data = [self.sequence_data.select(feat).to_series().to_numpy() for feat in self.ad_feats]
+            self.user_data = self.sequence_data.select(self.user_feats).to_numpy().squeeze().astype(np.int64)
+            self.ads_data = [self.sequence_data.select(feat).to_series().to_numpy().astype(np.int64) for feat in self.ad_feats]
             if len(self.ad_feats) == 1:
                 self.ads_data = self.ads_data[0]
-            self.interaction_data = self.sequence_data.select("btag").to_series().to_numpy()
-            self.timestamps = self.sequence_data.select("timestamp").to_series().to_numpy()
-            self.padded_masks = self.sequence_data.select("padded_mask").to_series().to_numpy()
+            self.interaction_data = self.sequence_data.select("btag").to_series().to_numpy().astype(np.int32)
+            self.timestamps = self.sequence_data.select("timestamp").to_series().to_numpy().astype(np.int32)
+            self.padded_masks = self.sequence_data.select("padded_mask").to_series().to_numpy().astype(bool)
         else:
-            self.user_data = self.user_data.to_numpy().squeeze()
-            self.ads_data = self.ads_data.to_numpy().squeeze()
-            self.interaction_data = self.interaction_data.to_series().to_numpy()
-            self.timestamps = self.timestamps.to_series().to_numpy()
+            self.user_data = raw_data.select(self.user_feats).to_numpy().squeeze().astype(np.int64)
+            self.ads_data = raw_data.select(self.ad_feats).to_numpy().squeeze().astype(np.int64)
+            self.interaction_data = raw_data.select("btag").to_series().to_numpy().astype(np.int32)
+            self.timestamps = raw_data.select("timestamp").to_series().to_numpy().astype(np.int32)
         
+        del raw_data
         del train_data
         del test_data
     
@@ -136,10 +140,8 @@ class TaobaoDataset(Dataset):
         else:
             user_data, ads_data, timestamps, interactions = self.user_data[idx], self.ads_data[idx], self.timestamps[idx], self.interaction_data[idx]
             ads_masks = []
-            ad_feats_start = 1 if self.include_ad_ids else 0
-            for i, dim in enumerate(self.output_dims[1+ad_feats_start:]):
-                ad_feats_end = i + 1 + ad_feats_start
-                mask_indices = self.conditional_mappings[i][tuple(ads_data[ad_feats_start:ad_feats_end].tolist())]
+            for i, dim in enumerate(self.output_dims[1:]):
+                mask_indices = self.conditional_mappings[i][tuple(ads_data[:i+1].tolist())]
                 mask = np.ones(dim, dtype=bool)
                 mask[mask_indices] = False
                 ads_masks.append(mask)
