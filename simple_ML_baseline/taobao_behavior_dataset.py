@@ -151,11 +151,11 @@ class TaobaoDataset(Dataset):
     
     @cached_property
     def n_users(self):
-        return self.user_profile["user"].max()+1
+        return len(self.user_profile["user"].unique())+1
 
     @cached_property
     def n_ads(self):
-        return self.ad_feature["adgroup"].max()+1
+        return len(self.ad_feature["adgroup"].unique())+1
     
     def __len__(self):
         return len(self.timestamps)
