@@ -36,15 +36,12 @@ print("Using device:", device)
 # %%
 parser = argparse.ArgumentParser()
 parser.add_argument("--run_label", type=str)
-parser.add_argument("--eval_model_id", type=str, default="")
 parser.add_argument("--conditional", action="store_true")
 parser.add_argument("--residual", action="store_true")
 parser.add_argument("--user_feats", action="store_true")
 
 args = parser.parse_args()
 run_label = args.run_label
-eval_model_id = args.eval_model_id
-eval_only = eval_model_id != ""
 conditional = args.conditional
 residual = args.residual
 user_feats = args.user_feats
@@ -75,8 +72,6 @@ train_dataset = TaobaoDataset(mode="finetune", **dataset_params)
 train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
 # %%
-if eval_only:
-    dataset_params['ad_features'].append("adgroup")
 test_dataset = TaobaoDataset(mode="test", **dataset_params)
 test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
@@ -90,60 +85,6 @@ model = AdFeaturesPredictor(
     activation_function='nn.ReLU()',
     device=device,
 )
-
-# %%
-if eval_only:
-    reduction_tracker = ReductionTracker(test_dataset.ad_features)
-    
-    model.load_state_dict(torch.load(os.path.join(model_dir, "best_model.pth"))['model_state_dict'])
-    model.eval()
-    with torch.inference_mode(), tqdm(test_dataloader) as pbar:
-        n_users = 0
-        ndcg_scores = []
-        for user_data, ads_features, _, _, _ in pbar:
-            n_users += user_data.shape[0]
-            
-            user_data = user_data.to(device)
-            ads_features = ads_features.to(device)
-
-            ad_feature_logits = *model(user_data), ads_features[:, -1]
-            for d_cat, d_brand, d_cust, d_camp, target_ad_id in zip(*ad_feature_logits):
-                category_freqs = FrequencyTracker.from_softmax_distribution(d_cat.exp())
-                brand_freqs = FrequencyTracker.from_softmax_distribution(d_brand.exp())
-                customer_freqs = FrequencyTracker.from_softmax_distribution(d_cust.exp())
-                campaign_freqs = FrequencyTracker.from_softmax_distribution(d_camp.exp())
-
-                score_util = ScoreUtil(
-                    reduction_tracker=reduction_tracker,
-                    category_freqs=category_freqs,
-                    brand_freqs=brand_freqs,
-                    customer_freqs=customer_freqs,
-                    campaign_freqs=campaign_freqs,
-                )
-
-                ndcg_scores.append(compute_ndcg(
-                    score_util,
-                    target_ad_id=target_ad_id.item(),
-                    subsampling=0.1,
-                    verbose=False,
-                    use_tqdm=False,
-                ))
-
-                pbar.set_postfix({'avg NDCG': float(np.mean(ndcg_scores))})
-
-    with open('log.txt', 'a') as log_file:
-        def print_and_log(*args, **kwargs):
-            print(*args, **kwargs)
-            kwargs['file'] = log_file
-            print(*args, **kwargs)
-
-        print_and_log(f"eval results for model: type='{run_label}' id='{eval_model_id}'")
-        print_and_log("Validation Loss:", validation_loss)
-        print_and_log("Avg NDCG:", float(np.mean(ndcg_scores)))
-        print_and_log()
-
-    exit(0)
-
 
 # %%
 loss_fn = MaskedCrossEntropyLoss()
