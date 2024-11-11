@@ -12,18 +12,6 @@ from tqdm import tqdm
 from non_ml_baseline.simple_eval import OptimizedFrequencyTracker as FrequencyTracker, ReductionTracker, ScoreUtil, compute_ndcg
 
 # %%
-def gen_ads_mask(ads_data, dataset, device):
-    ads_masks = [np.ones((len(ads_data), dim), dtype=bool) for dim in dataset.output_dims[1:]]
-    for i in range(len(ads_data)):
-        ad_data = ads_data[i]
-        if dataset.include_ad_ids:
-            ad_data = ad_data[1:]
-        for j, mask in enumerate(ads_masks):
-            mask[i, dataset.conditional_mappings[j][tuple(ad_data[:j+1].tolist())]] = False
-    ads_masks = [torch.tensor(mask, dtype=torch.bool, device=device) for mask in ads_masks]
-    return [None] + ads_masks
-
-# %%
 if torch.cuda.is_available():
     device = 'cuda'
 elif torch.backends.mps.is_available():
@@ -58,7 +46,7 @@ outputs_dir = os.path.join("outputs", run_label)
 # %%
 dataset_params = {
     "data_dir": "../data",
-    "min_train_clks": 1,
+    "min_train_clks": 4,
     "num_test_clks": 1,
     "include_ad_non_clks": False,
     "sequence_mode": False,
@@ -131,9 +119,9 @@ for epoch in range(start_epoch, train_epochs):
             optimizer.zero_grad()
             ad_feature_logits = model(user_data)
             loss = loss_fn(
-                logits = ad_feature_logits,
-                logit_masks = ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
-                targets = ads_features
+                logits=ad_feature_logits,
+                logit_masks=ads_masks,
+                targets=ads_features,
             )
             loss.backward()
             optimizer.step()
@@ -144,7 +132,7 @@ for epoch in range(start_epoch, train_epochs):
 
     if epoch % eval_every_n == 0:
         model.eval()
-        with torch.no_grad():
+        with torch.inference_mode():
             total_loss = 0
             with tqdm(test_dataloader) as pbar:
                 batches = 0
@@ -158,10 +146,10 @@ for epoch in range(start_epoch, train_epochs):
 
                     ad_feature_logits = model(user_data)
                     loss = loss_fn(
-                        logits = ad_feature_logits,
-                        logit_masks = ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
-                        targets = ads_features,
-                        penalize_masked = False
+                        logits=ad_feature_logits,
+                        logit_masks=ads_masks,
+                        targets=ads_features,
+                        penalize_masked=False,
                     )
                     total_loss += loss.item()
                     batches += 1

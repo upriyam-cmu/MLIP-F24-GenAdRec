@@ -92,16 +92,16 @@ class Trainer:
             self.eval_dataloader = DataLoader(self.eval_dataset, sampler=sampler, batch_size=None)
 
             self.model = TwoTowerModel(
-                ads_categorical_features=self.train_dataset.categorical_features, 
-                ads_hidden_dims=self.embedder_hidden_dims, 
-                n_users=self.train_dataset.n_users, 
-                embedding_dim=self.embedding_dim, 
-                use_user_ids=True, 
+                ads_categorical_features=self.train_dataset.categorical_features,
+                ads_hidden_dims=self.embedder_hidden_dims,
+                n_users=self.train_dataset.n_users,
+                embedding_dim=self.embedding_dim,
+                use_user_ids=True,
                 device=self.device
             )
         
         elif self.model_type == ModelType.SEQ:
-            self.taobao_dataset = TaobaoDataset(
+            self.train_dataset = TaobaoDataset(
                 data_dir="data",
                 min_ad_clicks=5,
                 mode="finetune",
@@ -111,12 +111,25 @@ class Trainer:
                 conditional_masking=False
             )
 
-            sampler = BatchSampler(RandomSampler(self.taobao_dataset), self.batch_size, False)
-            self.train_dataloader = DataLoader(self.taobao_dataset, sampler=sampler, batch_size=None)
-            batch = next(iter(self.train_dataloader))
-            model = RNNSeqModel(
-                n_users=self.taobao_dataset.n_users,
-                ad_categorical_feats=[CategoricalFeature("adgroup_id", self.taobao_dataset.n_ads)],
+            sampler = BatchSampler(RandomSampler(self.train_dataset), self.batch_size, False)
+            self.train_dataloader = DataLoader(self.train_dataset, sampler=sampler, batch_size=None)
+
+            self.eval_dataset = TaobaoDataset(
+                data_dir="data",
+                min_ad_clicks=5,
+                mode="test",
+                sequence_mode=True,
+                user_features=["user"],  # ["user", "gender", "age", "shopping", "occupation"],
+                ad_features=["adgroup"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
+                conditional_masking=False
+            )
+
+            sampler = BatchSampler(RandomSampler(self.eval_dataset), self.eval_batch_size, False)
+            self.eval_dataloader = DataLoader(self.eval_dataset, sampler=sampler, batch_size=None)
+
+            self.model = RNNSeqModel(
+                n_users=self.train_dataset.n_users,
+                ad_categorical_feats=[CategoricalFeature("adgroup_id", self.train_dataset.n_ads)],
                 cell_type="LSTM",
                 rnn_input_size=self.embedding_dim,
                 rnn_hidden_size=self.embedding_dim,
@@ -124,7 +137,7 @@ class Trainer:
                 embedder_hidden_dims=self.embedder_hidden_dims,
                 rnn_batch_first=True
             )
-            model(batch)
+            
             import pdb; pdb.set_trace()
         else:
             raise Exception(f"Unsupported model type {self.model_type}")

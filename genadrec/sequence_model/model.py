@@ -3,6 +3,7 @@ import torch.nn as nn
 from dataset.interactions import CategoricalFeature
 from embedding.user import UserIdTower
 from embedding.ads import AdTower
+from loss.softmax import SampledSoftmaxLoss
 from model.seq import RNN
 from simple_ML_baseline.taobao_behavior_dataset import TaobaoInteractionsSeqBatch
 from typing import List
@@ -44,6 +45,8 @@ class RNNSeqModel(nn.Module):
         )
 
         self.action_embedding = nn.Embedding(3, embedding_dim=rnn_input_size, padding_idx=1, max_norm=1, device=device)
+        self.sampled_softmax = SampledSoftmaxLoss()
+        self.device = device
 
     def forward(self, batch: TaobaoInteractionsSeqBatch):
         user_emb = self.user_embedding(batch.user_feats)
@@ -52,29 +55,38 @@ class RNNSeqModel(nn.Module):
         action_emb = self.action_embedding(action)
         is_click = batch.is_click == 1
 
+        B, L, D = ad_emb.shape
+
         input_emb = ad_emb + action_emb
         mask = (
             (~batch.is_padding).unsqueeze(1) &
             (batch.timestamp.unsqueeze(2) >= batch.timestamp.unsqueeze(1)) &
-            (batch.ad_feats.adgroup_id.unsqueeze(2) != batch.ad_feats.adgroup_id.unsqueeze(1))
-        )
-    
+            (batch.ad_feats.adgroup_id.unsqueeze(2) != batch.ad_feats.adgroup_id.unsqueeze(1)) & 
+            (batch.is_click == -1).unsqueeze(1)
+        )[:, 1:, :]
+        pos_neg_mask_expanded = torch.zeros_like(mask).unsqueeze(3).repeat(1, 1, 1, B)
+        indices = torch.arange(B, dtype=torch.int32, device=self.device)
+        pos_neg_mask_expanded[indices, :, :, indices] = mask
 
+        shifted_is_click = is_click[:, 1:]
         model_output = self.rnn(input_emb)[:, :-1, :]
-        target_emb = ad_emb[:, 1:, :]
+        
+        pos_neg_mask = torch.flatten(pos_neg_mask_expanded[shifted_is_click], start_dim=1, end_dim=2)
+        target_emb = ad_emb[:, 1:, :][shifted_is_click, :]
+        pos_emb = model_output[shifted_is_click, :]
+        q_probas = batch.ad_feats.rel_ad_freqs.to(torch.float32)
+        neg_emb = ad_emb.reshape(-1, D)
+        pos_q_probas = q_probas[:, 1:][shifted_is_click]
 
-        import pdb; pdb.set_trace()
+        loss = self.sampled_softmax.forward(
+            pos_emb=pos_emb,
+            target_emb=target_emb,
+            neg_emb=neg_emb,
+            pos_q_probas=pos_q_probas,
+            neg_q_probas=q_probas.flatten(),
+            pos_neg_mask=pos_neg_mask.to(torch.float32)
+        )
 
-        B, L, D = target_emb.shape
-        target_is_click = is_click[:, 1:, :]
-        n_clicks = target_is_click.sum(axis=1).unsqueeze(1)
-        click_mask = torch.arange(n_clicks.max(), device=n_clicks.device).repeat(B, 1) < n_clicks
-        click_emb = torch.zeros(B, n_clicks.max(), D, device=n_clicks.device)
-        click_emb[click_mask] = target_emb[target_is_click]
-
-        is_click[:, 1:]
-
-
-        import pdb; pdb.set_trace()
+        return loss
         
 

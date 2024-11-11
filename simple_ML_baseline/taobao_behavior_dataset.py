@@ -106,9 +106,9 @@ class TaobaoDataset(Dataset):
         
         transformed_data = (pl
             .concat([self.user_data, self.ads_data, self.interaction_data], how="horizontal")
-            .select(pl.all(), rel_ad_freq = pl.len().over("adgroup") / len(self.interaction_data))
+            .select(pl.all(), (pl.len().over("adgroup") / len(self.interaction_data)).cast(pl.Float32).alias("rel_ad_freq"))
         )
-
+        
         if sequence_mode:
             user_features.remove("user")
             sequences = (transformed_data
