@@ -37,31 +37,39 @@ class TaobaoDataset(Dataset):
         assert "user" in user_features, f"Missing user id in user features: {user_features}"
         assert "adgroup" in ad_features, f"Missing ad id in ad features: {ad_features}"
         
-        self.conditional_masking = conditional_masking
-        self.sequence_mode = sequence_mode
+        user_profile_parquet = os.path.join(data_dir, f"user_profile_{min_ad_clicks}.parquet")
+        ad_feature_parquet = os.path.join(data_dir, f"ad_feature_{min_ad_clicks}.parquet")
+        train_parquet = os.path.join(data_dir, f"train_{min_ad_clicks}.parquet")
+        test_parquet = os.path.join(data_dir, f"test_{min_ad_clicks}.parquet")
         
-        train_parquet = os.path.join(data_dir, f"train_min_{min_ad_clicks}_click.parquet")
-        test_parquet = os.path.join(data_dir, f"test_min_{min_ad_clicks}_click.parquet")
-        
+        assert os.path.isfile(user_profile_parquet), f"Cannot find user_profile file {user_profile_parquet}. Please generate using data_preprocess_encode.ipynb"
+        assert os.path.isfile(ad_feature_parquet), f"Cannot find ad_feature file {ad_feature_parquet}. Please generate using data_preprocess_encode.ipynb"
         assert os.path.isfile(train_parquet), f"Cannot find train data file {train_parquet}. Please generate using data_preprocess.ipynb"
         assert os.path.isfile(test_parquet), f"Cannot find test data file {test_parquet}. Please generate using data_preprocess.ipynb"
+        
+        self.mode = mode
+        self.interaction_mapping = {-1: "ad_non_click" ,0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
+        self.conditional_masking = conditional_masking
+        self.sequence_mode = sequence_mode
         
         train_data = pl.read_parquet(train_parquet)
         test_data = pl.read_parquet(test_parquet)
 
         self.user_feats = list(user_features)
-        self.user_profile = pl.concat([
-            train_data.select(self.user_feats).unique(),
-            test_data.select(self.user_feats).unique(),
-        ]).unique()
+        self.user_profile = pl.read_parquet(user_profile_parquet).select(self.user_feats).unique()
+        # self.user_profile = pl.concat([
+        #     train_data.select(self.user_feats).unique(),
+        #     test_data.select(self.user_feats).unique(),
+        # ]).unique()
         self.user_encoder = OrdinalEncoder(dtype=np.uint32).fit(self.user_profile)
         self.user_encoder.set_output(transform="polars")
 
         self.ad_feats = list(ad_features)
-        self.ad_feature = pl.concat([
-            train_data.select(self.ad_feats).unique(),
-            test_data.select(self.ad_feats).unique(),
-        ]).unique()
+        self.ad_feature = pl.read_parquet(ad_feature_parquet).select(self.ad_feats).unique()
+        # self.ad_feature = pl.concat([
+        #     train_data.select(self.ad_feats).unique(),
+        #     test_data.select(self.ad_feats).unique(),
+        # ]).unique()
         self.ad_encoder = OrdinalEncoder(dtype=np.int32, encoded_missing_value=-1).fit(self.ad_feature)
         self.ad_encoder.set_output(transform="polars")
 
@@ -98,20 +106,21 @@ class TaobaoDataset(Dataset):
                 test_data,
             ])
 
-        self.user_data = self.user_encoder.transform(raw_data.select(self.user_feats))
-        self.ads_data = self.ad_encoder.transform(raw_data.select(self.ad_feats))
+        # self.user_data = self.user_encoder.transform(raw_data.select(self.user_feats))
+        # self.ads_data = self.ad_encoder.transform(raw_data.select(self.ad_feats))
         
-        self.interaction_mapping = {-1: "non_ad_click", 0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
-        self.interaction_data = raw_data.select("btag", "timestamp")
+        # self.interaction_mapping = {-1: "non_ad_click", 0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
+        # self.interaction_data = raw_data.select("btag", "timestamp")
         
-        transformed_data = (pl
-            .concat([self.user_data, self.ads_data, self.interaction_data], how="horizontal")
-            .select(pl.all(), (pl.len().over("adgroup") / len(self.interaction_data)).cast(pl.Float32).alias("rel_ad_freq"))
-        )
+        # transformed_data = (pl
+        #     .concat([self.user_data, self.ads_data, self.interaction_data], how="horizontal")
+        #     .select(pl.all(), (pl.len().over("adgroup") / len(self.interaction_data)).cast(pl.Float32).alias("rel_ad_freq"))
+        # )
         
         if sequence_mode:
             user_features.remove("user")
-            sequences = (transformed_data
+            sequences = (raw_data
+                .select(pl.all(), (pl.len().over("adgroup") / len(self.interaction_data)).cast(pl.Float32).alias("rel_ad_freq"))
                 .sort("user", "timestamp")
                 .group_by("user", maintain_order=True)
                 .agg(
@@ -144,7 +153,6 @@ class TaobaoDataset(Dataset):
             self.interaction_data = self.interaction_data.to_series().to_numpy()
             self.timestamps = self.timestamps.to_series().to_numpy()
         
-        del transformed_data
         del raw_data
         del train_data
         del test_data

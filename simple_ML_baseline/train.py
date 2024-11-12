@@ -46,7 +46,7 @@ outputs_dir = os.path.join("outputs", run_label)
 # %%
 dataset_params = {
     "data_dir": "../data",
-    "min_train_clks": 4,
+    "min_train_clks": 1,
     "num_test_clks": 1,
     "include_ad_non_clks": False,
     "sequence_mode": False,
@@ -56,12 +56,16 @@ dataset_params = {
 }
 
 # %%
+print(">>> Start loading finetuning dataset")
 train_dataset = TaobaoDataset(mode="finetune", **dataset_params)
 train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+print(">>> Finished loading finetuning dataset")
 
 # %%
+print(">>> Start loading test dataset")
 test_dataset = TaobaoDataset(mode="test", **dataset_params)
 test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+print(">>> Finished loading test dataset")
 
 # %%
 model = AdFeaturesPredictor(
@@ -94,14 +98,16 @@ epoch_train_loss_curve = []
 # %%
 best_model_path = os.path.join(model_dir, "best_model.pth")
 if os.path.isfile(best_model_path):
+    print(f">>> Start loading best model: {best_model_path}")
     state_dicts = torch.load(best_model_path)
     start_epoch = state_dicts['epoch'] + 1
     model.load_state_dict(state_dicts['model_state_dict'])
-    optimizer.load_state_dict(state_dicts['optimizer_state_dict'])
-    best_val_loss = state_dicts['best_val_loss']
+    # optimizer.load_state_dict(state_dicts['optimizer_state_dict'])
+    # best_val_loss = state_dicts['best_val_loss']
     train_loss_per_epoch = state_dicts['train_loss_per_epoch']
     test_loss_per_epoch = state_dicts['test_loss_per_epoch']
     epoch_train_loss_curve = state_dicts['epoch_loss_curves']
+    print(f">>> Finished loading best model saved at epoch {start_epoch-1}")
 
 # %%
 for epoch in range(start_epoch, train_epochs):

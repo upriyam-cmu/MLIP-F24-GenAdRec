@@ -3,7 +3,7 @@ import os
 import torch
 import numpy as np
 import argparse
-from taobao_behavior_dataset_old import TaobaoUserClicksDataset
+from taobao_simple_dataset import TaobaoDataset
 from ad_features_predictor import AdFeaturesPredictor
 from masked_cross_entropy_loss import MaskedCrossEntropyLoss
 from torch.utils.data import DataLoader
@@ -48,28 +48,28 @@ outputs_dir = os.path.join("outputs", run_label)
 # %%
 dataset_params = {
     "data_dir": "../data",
-    "filter_clicks": True,
-    "include_user_ids": True,
-    "user_features": ["final_gender_code", "age_level", "shopping_level", "occupation"] if user_feats else [],
-    "include_ad_ids": False,
-    "ad_features": ["cate_id", "brand", "customer", "campaign_id"],
+    "min_train_clks": 1,
+    "num_test_clks": 1,
+    "include_ad_non_clks": False,
+    "sequence_mode": False,
+    "user_features": ["user", "gender", "age", "shopping", "occupation"] if user_feats else ["user"],
+    "ad_features": ["cate", "brand", "customer", "campaign"],
+    "conditional_masking": True,
 }
-train_dataset = TaobaoUserClicksDataset(training=True, **dataset_params)
-loss_eval_dataset = TaobaoUserClicksDataset(training=False, **dataset_params)
-dataset_params['include_ad_ids'] = True
-test_dataset = TaobaoUserClicksDataset(training=False, **dataset_params)
+loss_eval_dataset = TaobaoDataset(training=False, **dataset_params)
+dataset_params['ad_features'].append("adgroup")
+test_dataset = TaobaoDataset(training=False, **dataset_params)
 
 # %%
-train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 ndcg_test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 validation_loader = DataLoader(loss_eval_dataset, batch_size=batch_size, shuffle=True)
 
 # %%
 model = AdFeaturesPredictor(
-    input_cardinalities=train_dataset.input_dims,
-    embedding_dims=[64] * len(train_dataset.input_dims),
-    hidden_dim_specs=[(128, 64)] * len(train_dataset.output_dims),
-    output_cardinalities=train_dataset.output_dims,
+    input_cardinalities=test_dataset.input_dims,
+    embedding_dims=[64] * len(test_dataset.input_dims),
+    hidden_dim_specs=[(128, 64)] * len(test_dataset.output_dims),
+    output_cardinalities=test_dataset.output_dims,
     residual_connections=residual,
     activation_function='nn.ReLU()',
     device=device,
@@ -100,7 +100,7 @@ with torch.inference_mode():
             ad_feature_logits = model(user_data)
             loss = loss_fn(
                 logits = ad_feature_logits,
-                logit_masks = ads_masks, # gen_ads_mask(ads_features, train_dataset, device),
+                logit_masks = ads_masks,
                 targets = ads_features,
                 penalize_masked = False,
             )
