@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import polars as pl
+import torch
 from functools import cached_property
 from sklearn.preprocessing import OrdinalEncoder
 from torch.utils.data.dataset import Dataset
@@ -164,6 +165,10 @@ class TaobaoDataset(Dataset):
     @cached_property
     def n_ads(self):
         return len(self.ad_feature["adgroup"].unique())+1
+    
+    def get_index(self):
+        ad_index = torch.arange(self.n_ads)
+        return AdBatch(adgroup_id=ad_index, rel_ad_freqs=None)
     
     def __len__(self):
         return len(self.timestamps)

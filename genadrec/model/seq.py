@@ -43,6 +43,7 @@ class RNN(nn.Module):
             input_size=input_size,
             hidden_size=hidden_size,
             batch_first=batch_first,
+            num_layers=2
         )
 
         if normalize:

@@ -9,7 +9,6 @@ from masked_cross_entropy_loss import MaskedCrossEntropyLoss
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from tqdm import tqdm
-from non_ml_baseline.simple_eval import OptimizedFrequencyTracker as FrequencyTracker, ReductionTracker, ScoreUtil, compute_ndcg
 
 # %%
 if torch.cuda.is_available():
@@ -23,7 +22,7 @@ print("Using device:", device)
 
 # %%
 parser = argparse.ArgumentParser()
-parser.add_argument("--run_label", type=str)
+parser.add_argument("--run_label", type=str, default="")
 parser.add_argument("--conditional", action="store_true")
 parser.add_argument("--residual", action="store_true")
 parser.add_argument("--user_feats", action="store_true")
@@ -34,8 +33,15 @@ conditional = args.conditional
 residual = args.residual
 user_feats = args.user_feats
 
+if run_label == "":
+    run_label = '-'.join([
+        'conditional' if conditional else 'marginal',
+        'residual' if residual else 'independent',
+        'user_fts' if user_feats else 'uid_only',
+    ])
+
 # %%
-batch_size = 1024
+batch_size = 128
 learning_rate = 0.001
 train_epochs = 30
 eval_every_n = 1
@@ -133,7 +139,7 @@ for epoch in range(start_epoch, train_epochs):
             optimizer.step()
             train_losses.append(loss.item())
             pbar.set_postfix({'Loss': loss.item()})
-        train_loss_per_epoch.append(np.mean(train_losses))
+        train_loss_per_epoch.append(float(np.mean(train_losses)))
         epoch_train_loss_curve.append(train_losses)
 
     if epoch % eval_every_n == 0:
