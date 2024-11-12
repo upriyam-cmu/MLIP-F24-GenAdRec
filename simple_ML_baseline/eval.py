@@ -36,7 +36,7 @@ residual = args.residual
 user_feats = args.user_feats
 
 # %%
-batch_size = 2048
+batch_size = 1024
 learning_rate = 0.001
 train_epochs = 30
 eval_every_n = 1
@@ -55,20 +55,20 @@ dataset_params = {
     "ad_features": ["cate", "brand", "customer", "campaign"],
     "conditional_masking": True,
 }
-loss_eval_dataset = TaobaoDataset(training=False, **dataset_params)
-dataset_params['ad_features'].append("adgroup")
-test_dataset = TaobaoDataset(training=False, **dataset_params)
-
 # %%
-ndcg_test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+loss_eval_dataset = TaobaoDataset(mode="test", **dataset_params)
 validation_loader = DataLoader(loss_eval_dataset, batch_size=batch_size, shuffle=True)
 
 # %%
+test_dataset = TaobaoDataset(mode="test", **{**dataset_params, "ad_features": ["adgroup", "cate", "brand", "customer", "campaign"]})
+ndcg_test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+# %%
 model = AdFeaturesPredictor(
-    input_cardinalities=test_dataset.input_dims,
-    embedding_dims=[64] * len(test_dataset.input_dims),
-    hidden_dim_specs=[(128, 64)] * len(test_dataset.output_dims),
-    output_cardinalities=test_dataset.output_dims,
+    input_cardinalities=loss_eval_dataset.input_dims,
+    embedding_dims=[64] * len(loss_eval_dataset.input_dims),
+    hidden_dim_specs=[(128, 64)] * len(loss_eval_dataset.output_dims),
+    output_cardinalities=loss_eval_dataset.output_dims,
     residual_connections=residual,
     activation_function='nn.ReLU()',
     device=device,
