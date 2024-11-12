@@ -103,7 +103,7 @@ class RNNSeqModel(nn.Module):
         neg_emb = torch.flatten(ad_emb, start_dim=0, end_dim=1)
         pos_q_probas = q_probas[:, 1:][shifted_is_click]
 
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
 
         loss = self.sampled_softmax.forward(
             pos_emb=pos_emb,
