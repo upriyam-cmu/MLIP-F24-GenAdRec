@@ -24,7 +24,7 @@ class TaobaoInteractionsSeqBatch(NamedTuple):
     timestamp: np.array
     is_padding: np.array
 
-MAX_SEQ_LEN = 200
+MAX_SEQ_LEN = 300
 
 class TaobaoDataset(Dataset):
 
@@ -104,8 +104,8 @@ class TaobaoDataset(Dataset):
             raw_data = train_data
         elif mode == "test":
             raw_data = pl.concat([
-                train_data.drop_nulls("adgroup"),
-                test_data,
+                train_data.drop_nulls("adgroup").with_columns(pl.lit(0).alias("is_test")),
+                test_data.with_columns(pl.lit(1).alias("is_test")),
             ])
 
         # self.user_data = self.user_encoder.transform(raw_data.select(self.user_feats))
@@ -121,17 +121,34 @@ class TaobaoDataset(Dataset):
         
         if sequence_mode:
             user_features.remove("user")
-            sequences = (raw_data
-                .select(pl.all(), (pl.len().over("adgroup") / len(raw_data)).cast(pl.Float32).alias("rel_ad_freq"))
-                .sort("user", "timestamp")
-                .with_row_count("row_num")
-                .with_columns((pl.col("row_num") // MAX_SEQ_LEN).alias("chunk_id"))
+            if mode != "test":
+                sorted_data = (raw_data
+                    .select(pl.all(), (pl.len().over("adgroup") / len(raw_data)).cast(pl.Float32).alias("rel_ad_freq"))
+                    .sort("user", "timestamp")
+                    .with_columns(
+                        (pl.col("timestamp").cum_count().over("user")-1).alias("row_num")
+                    )
+                    .with_columns((pl.col("row_num") // MAX_SEQ_LEN).alias("chunk_id"))
+                )
+            else:
+                sorted_data = (raw_data
+                    .select(pl.all(), (pl.len().over("adgroup") / len(raw_data)).cast(pl.Float32).alias("rel_ad_freq"))
+                    .sort(["user", "is_test", "timestamp"], descending=[False, True, True])
+                    .with_columns(
+                        (pl.col("timestamp").cum_count().over("user")-1).alias("row_num")
+                    )
+                    .with_columns((pl.col("row_num") // MAX_SEQ_LEN).alias("chunk_id"))
+                    .filter(pl.col("chunk_id") == 0)
+                    .sort("user", "timestamp", "is_test")
+                )
+
+            sequences = (sorted_data
                 .group_by(["user", "chunk_id"],  maintain_order=True)
                 .agg(
                     pl.col(user_features).first(), 
                     pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp"), 
                     seq_len=pl.col("btag").len()
-                )
+                    )
                 .drop("chunk_id")
             )
             max_seq_len = sequences.select(pl.col("seq_len").max()).item()

@@ -33,7 +33,7 @@ _rnn_cell_options = {
 
 
 class RNN(nn.Module):
-    def __init__(self, cell_type: str, input_size, hidden_size, normalize=False, batch_first=True) -> None:
+    def __init__(self, cell_type: str, input_size, hidden_size, device, normalize=False, batch_first=True) -> None:
         super().__init__()
 
         if cell_type not in _rnn_cell_options:
@@ -43,7 +43,8 @@ class RNN(nn.Module):
             input_size=input_size,
             hidden_size=hidden_size,
             batch_first=batch_first,
-            num_layers=2
+            num_layers=2,
+            device=device
         )
 
         if normalize:
