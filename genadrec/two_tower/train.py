@@ -130,7 +130,7 @@ class Trainer:
             self.model = RNNSeqModel(
                 n_users=self.train_dataset.n_users,
                 ad_categorical_feats=[CategoricalFeature("adgroup_id", self.train_dataset.n_ads)],
-                cell_type="LSTM",
+                cell_type="GRU",
                 rnn_input_size=self.embedding_dim,
                 rnn_hidden_size=self.embedding_dim,
                 device=self.device,
@@ -138,7 +138,6 @@ class Trainer:
                 rnn_batch_first=True
             )
             
-            import pdb; pdb.set_trace()
         else:
             raise Exception(f"Unsupported model type {self.model_type}")
 
@@ -160,7 +159,6 @@ class Trainer:
         return LoadedCheckpoint(model=model, optimizer=optimizer, sparse_optimizer=sparse_optimizer)
 
     def train(self):
-
         optimizer = AdamW(self.model.dense_grad_parameters(), lr=self.learning_rate)
         sparse_optimizer = SparseAdam(self.model.sparse_grad_parameters(), lr=self.learning_rate)
 

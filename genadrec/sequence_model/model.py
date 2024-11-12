@@ -3,8 +3,10 @@ import torch.nn as nn
 from dataset.interactions import CategoricalFeature
 from embedding.user import UserIdTower
 from embedding.ads import AdTower
+from itertools import chain
 from loss.softmax import SampledSoftmaxLoss
 from model.seq import RNN
+from simple_ML_baseline.taobao_behavior_dataset import AdBatch
 from simple_ML_baseline.taobao_behavior_dataset import TaobaoInteractionsSeqBatch
 from typing import List
 
@@ -30,12 +32,12 @@ class RNNSeqModel(nn.Module):
             batch_first=rnn_batch_first
         )
 
-        self.user_embedding = UserIdTower(
-            n_users=n_users,
-            embedding_dim=rnn_hidden_size,
-            hidden_dims=embedder_hidden_dims,
-            device=device
-        )
+        # self.user_embedding = UserIdTower(
+        #     n_users=n_users,
+        #     embedding_dim=rnn_hidden_size,
+        #     hidden_dims=embedder_hidden_dims,
+        #     device=device
+        # )
 
         self.ad_embedding = AdTower(
             categorical_features=ad_categorical_feats,
@@ -47,9 +49,19 @@ class RNNSeqModel(nn.Module):
         self.action_embedding = nn.Embedding(3, embedding_dim=rnn_input_size, padding_idx=1, max_norm=1, device=device)
         self.sampled_softmax = SampledSoftmaxLoss()
         self.device = device
+    
+    def dense_grad_parameters(self):
+        return chain(
+            self.action_embedding.parameters(),
+            self.ad_embedding.mlp.parameters(),
+            self.rnn.parameters()
+        )
+
+    def sparse_grad_parameters(self):
+        return self.ad_embedding.ad_embedder.parameters()
 
     def forward(self, batch: TaobaoInteractionsSeqBatch):
-        user_emb = self.user_embedding(batch.user_feats)
+        # user_emb = self.user_embedding(batch.user_feats)
         ad_emb = self.ad_embedding(batch.ad_feats)
         action = batch.is_click + 1
         action_emb = self.action_embedding(action)
@@ -88,5 +100,25 @@ class RNNSeqModel(nn.Module):
         )
 
         return loss
+    
+    def eval_forward(self, batch: TaobaoInteractionsSeqBatch):
+        ad_emb = self.ad_embedding(batch.ad_feats)
+        action = batch.is_click + 1
+        action_emb = self.action_embedding(action)
+        
+        input_emb = ad_emb + action_emb
+        output_emb = self.rnn(input_emb)
+
+        B, L, D = ad_emb.shape
+        
+        target_idx = (~batch.is_padding).sum(axis=1).unsqueeze(1) - 1
+        batch_idx = torch.arange(B, device=ad_emb.device)
+        target_emb = torch.diagonal(ad_emb[batch_idx, target_idx, :], dim1=0, dim2=1).T
+        pred_emb = torch.diagonal(output_emb[batch_idx, target_idx-1, :], dim1=0, dim2=1).T
+
+        return pred_emb, target_emb
+    
+    def ad_forward(self, batch: AdBatch):
+        return self.ad_embedding(batch).squeeze(0)
         
 
