@@ -24,7 +24,7 @@ class TaobaoInteractionsSeqBatch(NamedTuple):
     timestamp: np.array
     is_padding: np.array
 
-MAX_SEQ_LEN = 300
+MAX_SEQ_LEN = 100
 
 class TaobaoDataset(Dataset):
 
