@@ -24,6 +24,7 @@ class TaobaoInteractionsSeqBatch(NamedTuple):
     timestamp: np.array
     is_padding: np.array
 
+MAX_SEQ_LEN = 200
 
 class TaobaoDataset(Dataset):
 
@@ -121,14 +122,17 @@ class TaobaoDataset(Dataset):
         if sequence_mode:
             user_features.remove("user")
             sequences = (raw_data
-                .select(pl.all(), (pl.len().over("adgroup") / len(self.interaction_data)).cast(pl.Float32).alias("rel_ad_freq"))
+                .select(pl.all(), (pl.len().over("adgroup") / len(raw_data)).cast(pl.Float32).alias("rel_ad_freq"))
                 .sort("user", "timestamp")
-                .group_by("user", maintain_order=True)
+                .with_row_count("row_num")
+                .with_columns((pl.col("row_num") // MAX_SEQ_LEN).alias("chunk_id"))
+                .group_by(["user", "chunk_id"],  maintain_order=True)
                 .agg(
                     pl.col(user_features).first(), 
                     pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp"), 
                     seq_len=pl.col("btag").len()
                 )
+                .drop("chunk_id")
             )
             max_seq_len = sequences.select(pl.col("seq_len").max()).item()
             self.sequence_data = (sequences
