@@ -7,7 +7,6 @@ from taobao_behavior_dataset_old import TaobaoUserClicksDataset
 from ad_features_predictor import AdFeaturesPredictor
 from masked_cross_entropy_loss import MaskedCrossEntropyLoss
 from torch.utils.data import DataLoader
-from torch.optim import AdamW
 from tqdm import tqdm
 from non_ml_baseline.simple_eval import OptimizedFrequencyTracker as FrequencyTracker, ReductionTracker, ScoreUtil, compute_ndcg
 
