@@ -85,7 +85,7 @@ class RNNSeqModel(nn.Module):
         self.rnn.reset()
         model_output = self.rnn(input_emb)[:, :-1, :]
 
-        pos_ids = batch.ad_feats.adgroup_id[:,1:][shifted_is_click].unsqueeze(1)
+        pos_ids = batch.ad_feats.adgroup_id[:, 1:][shifted_is_click].unsqueeze(1)
         neg_ids = torch.flatten(batch.ad_feats.adgroup_id)
         
         # user_expanded = batch.user_feats.user.unsqueeze(1).repeat(1,L)
@@ -100,10 +100,10 @@ class RNNSeqModel(nn.Module):
         target_emb = ad_emb[:, 1:, :][shifted_is_click, :]
         pos_emb = model_output[shifted_is_click, :]
         q_probas = batch.ad_feats.rel_ad_freqs.to(torch.float32).to(self.device)
-        neg_emb = ad_emb.reshape(-1, D)
+        neg_emb = torch.flatten(ad_emb, start_dim=0, end_dim=1)
         pos_q_probas = q_probas[:, 1:][shifted_is_click]
 
-        #import pdb; pdb.set_trace()
+        import pdb; pdb.set_trace()
 
         loss = self.sampled_softmax.forward(
             pos_emb=pos_emb,
