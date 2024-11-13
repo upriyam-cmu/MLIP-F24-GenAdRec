@@ -124,24 +124,26 @@ class TaobaoDataset(Dataset):
         if sequence_mode:
             user_features.remove("user")
             if mode != "test":
-                sorted_data = (raw_data
+                sequences = (raw_data
                     .select(pl.all(), (pl.len().over("adgroup") / len(raw_data)).cast(pl.Float32).alias("rel_ad_freq"))
                     .sort("user", "timestamp")
-                    .with_columns(
-                        (pl.col("timestamp").cum_count().over("user")-1).alias("row_num")
+                    .with_columns(pl.when(pl.col("btag") == -1).then(0).otherwise(1).alias("btag_zeroed"))
+                    .group_by_dynamic(
+                        index_column=pl.int_range(pl.len()),
+                        every="10i",
+                        period=f"{MAX_SEQ_LEN}i",
+                        by="user"
                     )
-                    .with_columns((pl.col("row_num") // MAX_SEQ_LEN).alias("chunk_id"))
+                    .agg(
+                        pl.col(user_features).first(),
+                        pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp"),
+                        pl.sum("btag_zeroed").alias("click_cnt"),
+                        seq_len=pl.col("btag").len()
+                    )
+                    .filter(pl.col("click_cnt") >= min_ad_clicks-1)
+                    .drop(["click_cnt", "literal"])
                 )
 
-                #.agg([
-                #        pl.col(user_features).first(),
-                #        pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp")
-                #    ])
-                #)
-
-                #new_s = (sorted_data
-                #    .with_columns(pl.struct([pl.col(col_name).list.slice(i,i+MAX_SEQ_LEN).alias(f"{col_name}_{i}") for i in range(3)]).alias(f"{col_name}_lag") for col_name in self.ad_feats + ["rel_ad_freq", "btag", "timestamp"])
-                #) # TODO: Rolling window. Figure out how to convert struct to list and explode
             else:
                 sorted_data = (raw_data
                     .select(pl.all(), (pl.len().over("adgroup") / len(raw_data)).cast(pl.Float32).alias("rel_ad_freq"))
@@ -154,15 +156,15 @@ class TaobaoDataset(Dataset):
                     .sort("user", "timestamp", "is_test")
                 )
 
-            sequences = (sorted_data
-                .group_by(["user", "chunk_id"],  maintain_order=True)
-                .agg(
-                    pl.col(user_features).first(), 
-                    pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp"), 
-                    seq_len=pl.col("btag").len()
-                    )
-                .drop("chunk_id")
-            )
+                sequences = (sorted_data
+                    .group_by(["user", "chunk_id"],  maintain_order=True)
+                    .agg(
+                        pl.col(user_features).first(), 
+                        pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp"), 
+                        seq_len=pl.col("btag").len()
+                        )
+                    .drop("chunk_id")
+                )
 
             max_seq_len = sequences.select(pl.col("seq_len").max()).item()
             self.sequence_data = (sequences
