@@ -49,7 +49,7 @@ model_dir = os.path.join("models", run_label)
 # %%
 dataset_params = {
     "data_dir": "../data",
-    "min_train_clks": 4,
+    "min_train_clks": 1,
     "num_test_clks": 1,
     "include_ad_non_clks": False,
     "sequence_mode": False,
@@ -81,10 +81,12 @@ model = AdFeaturesPredictor(
 )
 
 # %%
-reduction_tracker = ReductionTracker(test_dataset.ad_features)
+ad_fts = test_dataset.ad_features
+ad_fts = ad_fts[ad_fts[:, 0] != -1]
+reduction_tracker = ReductionTracker(ad_fts)
 
 print(f"eval only: loading model '{eval_model_id}' from path '{model_dir}'")
-model.load_state_dict(torch.load(os.path.join(model_dir, f"{eval_model_id}.pth"))['model_state_dict'])
+model.load_state_dict(torch.load(os.path.join(model_dir, f"{eval_model_id}.pth"), map_location=device)['model_state_dict'])
 model.eval()
 
 sample_limit = 120
@@ -151,7 +153,7 @@ with torch.inference_mode():
             ndcg_scores.append(compute_ndcg(
                 score_util,
                 target_ad_id=target_ad_id.item(),
-                subsampling=0.01,
+                subsampling=0.1,
                 verbose=False,
                 use_tqdm=False,
             ))
