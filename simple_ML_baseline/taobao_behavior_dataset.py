@@ -10,6 +10,8 @@ from typing import NamedTuple
 
 class AdBatch(NamedTuple):
     adgroup_id: np.array
+    cate_id: np.array
+    brand_id: np.array
     rel_ad_freqs: np.array
 
 
@@ -130,6 +132,16 @@ class TaobaoDataset(Dataset):
                     )
                     .with_columns((pl.col("row_num") // MAX_SEQ_LEN).alias("chunk_id"))
                 )
+
+                #.agg([
+                #        pl.col(user_features).first(),
+                #        pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp")
+                #    ])
+                #)
+
+                #new_s = (sorted_data
+                #    .with_columns(pl.struct([pl.col(col_name).list.slice(i,i+MAX_SEQ_LEN).alias(f"{col_name}_{i}") for i in range(3)]).alias(f"{col_name}_lag") for col_name in self.ad_feats + ["rel_ad_freq", "btag", "timestamp"])
+                #) # TODO: Rolling window. Figure out how to convert struct to list and explode
             else:
                 sorted_data = (raw_data
                     .select(pl.all(), (pl.len().over("adgroup") / len(raw_data)).cast(pl.Float32).alias("rel_ad_freq"))
@@ -151,6 +163,7 @@ class TaobaoDataset(Dataset):
                     )
                 .drop("chunk_id")
             )
+
             max_seq_len = sequences.select(pl.col("seq_len").max()).item()
             self.sequence_data = (sequences
                 .with_columns(pad_len=max_seq_len-pl.col("seq_len"))
@@ -181,15 +194,27 @@ class TaobaoDataset(Dataset):
     
     @cached_property
     def n_users(self):
-        return len(self.user_profile["user"].unique())+1
+        return len(self.user_profile["user"].unique())
 
     @cached_property
     def n_ads(self):
-        return len(self.ad_feature["adgroup"].unique())+1
+        return len(self.ad_feature["adgroup"].unique())
+    
+    @cached_property
+    def n_brands(self):
+        return len(self.ad_feature["brand"].unique())
+
+    @cached_property
+    def n_cates(self):
+        return len(self.ad_feature["cate"].unique())
     
     def get_index(self):
-        ad_index = torch.arange(self.n_ads)
-        return AdBatch(adgroup_id=ad_index, rel_ad_freqs=None)
+        transformed_ad_feats = self.ad_encoder.transform(self.ad_feature).sort("adgroup")
+        batch = []
+        for feat_name in self.ad_feats:
+            batch.append(torch.tensor(transformed_ad_feats[feat_name].to_numpy()))
+        batch.append(None)
+        return AdBatch(*batch)
     
     def __len__(self):
         return len(self.timestamps)

@@ -111,7 +111,7 @@ class Trainer:
                 mode="finetune",
                 sequence_mode=True,
                 user_features=["user"],  # ["user", "gender", "age", "shopping", "occupation"],
-                ad_features=["adgroup"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
+                ad_features=["adgroup", "cate", "brand"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
                 conditional_masking=False
             )
 
@@ -124,7 +124,7 @@ class Trainer:
                 mode="test",
                 sequence_mode=True,
                 user_features=["user"],  # ["user", "gender", "age", "shopping", "occupation"],
-                ad_features=["adgroup"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
+                ad_features=["adgroup", "cate", "brand"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
                 conditional_masking=False
             )
 
@@ -133,7 +133,11 @@ class Trainer:
 
             self.model = RNNSeqModel(
                 n_users=self.train_dataset.n_users,
-                ad_categorical_feats=[CategoricalFeature("adgroup_id", self.train_dataset.n_ads)],
+                ad_categorical_feats=[
+                    #CategoricalFeature("adgroup_id", self.train_dataset.n_ads),
+                    CategoricalFeature("brand_id", self.train_dataset.n_brands),
+                    CategoricalFeature("cate_id", self.train_dataset.n_cates),
+                ],
                 cell_type=self.seq_rnn_cell_type,
                 rnn_input_size=self.embedding_dim,
                 rnn_hidden_size=self.embedding_dim,
