@@ -43,7 +43,8 @@ class Trainer:
                  save_model_every_n: int = 5,
                  max_grad_norm: int = 1,
                  embedder_hidden_dims: Optional[List[int]] = [1024, 512, 128],
-                 seq_rnn_cell_type: str = "LSTM",
+                 seq_rnn_cell_type: str = "GRU",
+                 seq_rnn_num_layers: int = 2,
                  force_dataset_reload: bool = False,
                  checkpoint_path: Optional[str] = None,
                  save_dir_root: str = "out/"
@@ -59,6 +60,7 @@ class Trainer:
         self.save_model_every_n = save_model_every_n
         self.embedder_hidden_dims = embedder_hidden_dims
         self.seq_rnn_cell_type = seq_rnn_cell_type
+        self.seq_rnn_num_layers = seq_rnn_num_layers
         self.force_dataset_reload = force_dataset_reload
         self.checkpoint_path = checkpoint_path
         self.save_dir_root = save_dir_root
@@ -135,6 +137,7 @@ class Trainer:
                 cell_type=self.seq_rnn_cell_type,
                 rnn_input_size=self.embedding_dim,
                 rnn_hidden_size=self.embedding_dim,
+                rnn_num_layers=self.seq_rnn_num_layers,
                 device=self.device,
                 embedder_hidden_dims=self.embedder_hidden_dims,
                 rnn_batch_first=True
@@ -158,6 +161,7 @@ class Trainer:
                 cell_type=self.seq_rnn_cell_type,
                 rnn_input_size=self.embedding_dim,
                 rnn_hidden_size=self.embedding_dim,
+                rnn_num_layers=self.seq_rnn_num_layers,
                 device=self.device,
                 embedder_hidden_dims=self.embedder_hidden_dims,
                 rnn_batch_first=True

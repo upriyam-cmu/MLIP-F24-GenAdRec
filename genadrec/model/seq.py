@@ -33,7 +33,7 @@ _rnn_cell_options = {
 
 
 class RNN(nn.Module):
-    def __init__(self, cell_type: str, input_size, hidden_size, device, normalize=False, batch_first=True) -> None:
+    def __init__(self, cell_type: str, input_size, hidden_size, num_layers, device, normalize=False, batch_first=True) -> None:
         super().__init__()
 
         if cell_type not in _rnn_cell_options:
@@ -43,7 +43,7 @@ class RNN(nn.Module):
             input_size=input_size,
             hidden_size=hidden_size,
             batch_first=batch_first,
-            num_layers=2,
+            num_layers=num_layers,
             device=device
         )
 
@@ -51,6 +51,7 @@ class RNN(nn.Module):
             self.norm = L2NormalizationLayer(dim=-1)
         self.normalize = normalize
 
+        self.num_layers = num_layers
         self.hidden_state = None
 
     def forward(self, X: torch.Tensor, h: torch.Tensor = None) -> torch.Tensor:
