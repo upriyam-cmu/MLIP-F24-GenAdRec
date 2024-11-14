@@ -285,8 +285,8 @@ if __name__ == "__main__":
         model_type=ModelType.SEQ,
         learning_rate=0.001, # 0.0005 for two_tower
         eval_batch_size=1024,
-        train_batch_size=32,
-        embedding_dim=32,
+        train_batch_size=64, # 32 for two_tower
+        embedding_dim=64, # 32 for two_tower
         force_dataset_reload=False
     )
     trainer.train()

@@ -49,6 +49,7 @@ class RNNSeqModel(nn.Module):
             device=device
         )
 
+        self.rnn_num_layers = rnn_num_layers
         self.action_embedding = nn.Embedding(3, embedding_dim=rnn_input_size, padding_idx=1, max_norm=1, device=device)
         self.sampled_softmax = SampledSoftmaxLoss()
         self.device = device
@@ -64,48 +65,56 @@ class RNNSeqModel(nn.Module):
         return chain(self.ad_embedding.ad_embedder.parameters(), self.user_embedding.id_embedding.parameters())
 
     def forward(self, batch: TaobaoInteractionsSeqBatch):
+        adgroup_id = batch.ad_feats.adgroup_id.to(self.device)
         user_emb = self.user_embedding(batch.user_feats)
         ad_emb = self.ad_embedding(batch.ad_feats)
         action = batch.is_click + 1
         action_emb = self.action_embedding(action.to(self.device))
-        is_click = batch.is_click == 1
+        q_probas = batch.ad_feats.rel_ad_freqs.to(torch.float32).to(self.device)
+        is_click = (batch.is_click == 1).to(self.device)
+        is_padding = batch.is_padding.to(self.device)
 
         B, L, D = ad_emb.shape
 
         input_emb = ad_emb + action_emb
-        #mask = (
-        #    (~batch.is_padding).unsqueeze(1) &
-        #    (batch.timestamp.unsqueeze(2) >= batch.timestamp.unsqueeze(1)) &
-        #    (batch.ad_feats.adgroup_id.unsqueeze(2) != batch.ad_feats.adgroup_id.unsqueeze(1)) & 
-        #    (batch.is_click == -1).unsqueeze(1)
-        #)[:, 1:, :].to(self.device)
-        #pos_neg_mask_expanded = torch.zeros_like(mask).unsqueeze(3).repeat(1, 1, 1, B)
-        #indices = torch.arange(B, dtype=torch.int32, device=self.device)
-        #pos_neg_mask_expanded[indices, :, :, indices] = mask
 
         shifted_is_click = is_click[:, 1:]
         seq_lengths = (~batch.is_padding).sum(axis=1)
         
         self.rnn.reset()
-        model_output = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2,1,1))[:, :-1, :]
+        model_output = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(self.rnn_num_layers,1,1))[:, :-1, :]
 
-        pos_ids = batch.ad_feats.adgroup_id[:, 1:][shifted_is_click].unsqueeze(1)
-        neg_ids = torch.flatten(batch.ad_feats.adgroup_id)
+        pos_ids = adgroup_id[:, 1:][shifted_is_click].unsqueeze(1)
+        neg_ids = torch.flatten(adgroup_id)
         
         # user_expanded = batch.user_feats.user.unsqueeze(1).repeat(1,L)
         # pos_users = user_expanded[:,1:][shifted_is_click].unsqueeze(1)
         # neg_users = torch.flatten(user_expanded)
+        #import pdb; pdb.set_trace()
+        #START TEST BLOCK 
+        
+        has_clicks_after = shifted_is_click.flip(dims=[1]).cumsum(dim=1).flip(dims=[1]) != 0
+        idxs = torch.arange(L-1, device=self.device).unsqueeze(0)
+        click_pos = torch.where(shifted_is_click, idxs, torch.full_like(idxs, L-2))
+        first_click_at_or_after = click_pos.flip(dims=[-1]).cummin(dim=-1).values.flip(dims=[-1])
+        next_click_id = adgroup_id[:, 1:].gather(dim=1, index=first_click_at_or_after)
+        next_click_emb = ad_emb[:, 1:].gather(dim=1, index=first_click_at_or_after.unsqueeze(2).repeat(1,1,D))
+        pos_ids = next_click_id[has_clicks_after].unsqueeze(1)
+        target_emb = next_click_emb[has_clicks_after]
+        pos_emb = model_output[has_clicks_after]
+        pos_q_probas = q_probas[:, 1:][has_clicks_after]
+
+        # END TEST BLOCK
 
         
         #pos_neg_mask = torch.flatten(pos_neg_mask_expanded[shifted_is_click], start_dim=1, end_dim=2)
         pos_neg_mask = (
-            (pos_ids != neg_ids) & ((~batch.is_padding).flatten())
-        ).to(self.device)
-        target_emb = ad_emb[:, 1:, :][shifted_is_click, :]
-        pos_emb = model_output[shifted_is_click, :]
-        q_probas = batch.ad_feats.rel_ad_freqs.to(torch.float32).to(self.device)
+            (pos_ids != neg_ids) & ((~is_padding).flatten())
+        )
+        #target_emb = ad_emb[:, 1:, :][shifted_is_click, :]
+        #pos_emb = model_output[shifted_is_click, :]
         neg_emb = torch.flatten(ad_emb, start_dim=0, end_dim=1)
-        pos_q_probas = q_probas[:, 1:][shifted_is_click]
+        #pos_q_probas = q_probas[:, 1:][shifted_is_click]
 
         #import pdb; pdb.set_trace()
 
@@ -128,7 +137,7 @@ class RNNSeqModel(nn.Module):
         
         input_emb = ad_emb + action_emb
         self.rnn.reset()
-        output_emb = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2,1,1))
+        output_emb = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(self.rnn_num_layers,1,1))
 
         B, L, D = ad_emb.shape
         
