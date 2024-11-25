@@ -43,16 +43,23 @@ class TaobaoDataset(Dataset):
         
         user_profile_parquet = os.path.join(data_dir, f"user_profile_{min_ad_clicks}.parquet")
         ad_feature_parquet = os.path.join(data_dir, f"ad_feature_{min_ad_clicks}.parquet")
+        train_parquet = os.path.join(data_dir, f"train_{min_ad_clicks}.parquet")
+        test_parquet = os.path.join(data_dir, f"test_{min_ad_clicks}.parquet")
         interactions_parquet = os.path.join(data_dir, f"interaction_seq_{min_ad_clicks}.parquet" if sequence_mode else f"interactions_{min_ad_clicks}.parquet")
         
         assert os.path.isfile(user_profile_parquet), f"Cannot find user_profile file {user_profile_parquet}. Please generate using data_preprocess_encode.ipynb"
         assert os.path.isfile(ad_feature_parquet), f"Cannot find ad_feature file {ad_feature_parquet}. Please generate using data_preprocess_encode.ipynb"
+        assert os.path.isfile(train_parquet), f"Cannot find train data file {train_parquet}. Please generate using data_preprocess.ipynb"
+        assert os.path.isfile(test_parquet), f"Cannot find test data file {test_parquet}. Please generate using data_preprocess.ipynb"
         assert os.path.isfile(interactions_parquet), f"Cannot find interactions file {interactions_parquet}. Please generate using data_preprocess.ipynb"
 
         self.mode = mode
         self.interaction_mapping = {-1: "ad_non_click" ,0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
         self.conditional_masking = conditional_masking
         self.sequence_mode = sequence_mode
+        
+        train_data = pl.read_parquet(train_parquet)
+        test_data = pl.read_parquet(test_parquet)
 
         self.user_feats = list(user_features)
         self.user_profile = pl.read_parquet(user_profile_parquet).select(self.user_feats).unique()
@@ -85,7 +92,7 @@ class TaobaoDataset(Dataset):
                 conditional_map.index = list(zip(*[conditional_map[self.ad_feats[j]] for j in range(i)]))
                 self.conditional_mappings.append(conditional_map.to_dict()[self.ad_feats[i]])
         
-#         interactions = pl.read_parquet(interactions_parquet)
+        interactions = pl.read_parquet(interactions_parquet)
 #         if sequence_mode:
 #             self.user_data = interactions.select(self.user_feats).to_numpy().squeeze()
 #             self.seq_lens = interactions.select("seq_len").to_series().to_numpy()
@@ -114,17 +121,6 @@ class TaobaoDataset(Dataset):
                 train_data.drop_nulls("adgroup").with_columns(pl.lit(0).alias("is_test")),
                 test_data.with_columns(pl.lit(1).alias("is_test")),
             ])
-
-        # self.user_data = self.user_encoder.transform(raw_data.select(self.user_feats))
-        # self.ads_data = self.ad_encoder.transform(raw_data.select(self.ad_feats))
-        
-        # self.interaction_mapping = {-1: "non_ad_click", 0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
-        # self.interaction_data = raw_data.select("btag", "timestamp")
-        
-        # transformed_data = (pl
-        #     .concat([self.user_data, self.ads_data, self.interaction_data], how="horizontal")
-        #     .select(pl.all(), (pl.len().over("adgroup") / len(self.interaction_data)).cast(pl.Float32).alias("rel_ad_freq"))
-        # )
         
         if sequence_mode:
             user_features.remove("user")
@@ -205,6 +201,9 @@ class TaobaoDataset(Dataset):
             self.interaction_data = interactions.select("btag").to_series().to_numpy()
             self.timestamps = interactions.select("timestamp").to_series().to_numpy()
         
+        del raw_data
+        del train_data
+        del test_data
         del interactions
     
     @cached_property
@@ -236,7 +235,8 @@ class TaobaoDataset(Dataset):
     
     def __getitem__(self, idx):
         if self.sequence_mode:
-            max_batch_len = self.seq_lens[idx].max()
+            max_batch_len = (~self.padded_masks[idx]).sum(axis=1).max()
+            # max_batch_len = self.seq_lens[idx].max()
             return TaobaoInteractionsSeqBatch(
                 UserBatch(self.user_data[idx].astype(np.int32)),
                 AdBatch(*([ads_feat[idx, :max_batch_len] for ads_feat in self.ads_data])),
