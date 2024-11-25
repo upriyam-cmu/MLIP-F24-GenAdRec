@@ -43,7 +43,7 @@ if run_label == "":
     ])
 
 # %%
-batch_size = 256
+batch_size = 1024
 model_dir = os.path.join("models", run_label)
 
 # %%

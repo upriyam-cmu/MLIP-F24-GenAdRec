@@ -116,8 +116,8 @@ class TaobaoDataset(Dataset):
             self.timestamps = self.sequence_data.select("timestamp").to_series().to_numpy().astype(np.int32)
             self.padded_masks = self.sequence_data.select("padded_mask").to_series().to_numpy().astype(bool)
         else:
-            self.user_data = raw_data.select(self.user_feats).to_numpy().squeeze().astype(np.int64)
-            self.ads_data = raw_data.select(self.ad_feats).to_numpy().squeeze().astype(np.int64)
+            self.user_data = raw_data.select(self.user_feats).to_numpy().astype(np.int64)
+            self.ads_data = raw_data.select(self.ad_feats).to_numpy().astype(np.int64)
             self.interaction_data = raw_data.select("btag").to_series().to_numpy().astype(np.int32)
             self.timestamps = raw_data.select("timestamp").to_series().to_numpy().astype(np.int32)
         

@@ -41,8 +41,8 @@ if run_label == "":
     ])
 
 # %%
-batch_size = 128
-learning_rate = 0.001
+batch_size = 1024
+learning_rate = 0.0005
 train_epochs = 30
 eval_every_n = 1
 save_every_n = 1

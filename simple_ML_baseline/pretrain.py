@@ -9,7 +9,6 @@ from masked_cross_entropy_loss import MaskedCrossEntropyLoss
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from tqdm import tqdm
-from non_ml_baseline.simple_eval import OptimizedFrequencyTracker as FrequencyTracker, ReductionTracker, ScoreUtil, compute_ndcg
 
 # %%
 if torch.cuda.is_available():
@@ -55,12 +54,16 @@ dataset_params = {
 }
 
 # %%
+print(">>> Start loading pretraining dataset")
 pretrain_dataset = TaobaoDataset(mode="pretrain", **dataset_params)
 pretrain_dataloader = DataLoader(pretrain_dataset, batch_size=batch_size, shuffle=True)
+print(">>> Finished loading pretraining dataset")
 
 # %%
+print(">>> Start loading test dataset")
 test_dataset = TaobaoDataset(mode="test", **dataset_params)
 test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+print(">>> Finished loading test dataset")
 
 # %%
 model = AdFeaturesPredictor(
@@ -91,6 +94,7 @@ epoch_train_loss_curve = []
 # %%
 best_model_path = os.path.join(model_dir, "best_model.pth")
 if os.path.isfile(best_model_path):
+    print(f">>> Start loading best model: {best_model_path}")
     state_dicts = torch.load(best_model_path)
     start_epoch = state_dicts['epoch'] + 1
     model.load_state_dict(state_dicts['model_state_dict'])
@@ -99,6 +103,7 @@ if os.path.isfile(best_model_path):
     train_loss_per_epoch = state_dicts['train_loss_per_epoch']
     test_loss_per_epoch = state_dicts['test_loss_per_epoch']
     epoch_train_loss_curve = state_dicts['epoch_loss_curves']
+    print(f">>> Finished loading best model saved at epoch {start_epoch-1}")
 
 # %%
 for epoch in range(pretrain_epochs):
