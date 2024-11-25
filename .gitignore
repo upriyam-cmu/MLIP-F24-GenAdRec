@@ -13,3 +13,4 @@ outputs
 .vscode
 out
 log.txt
+*.log

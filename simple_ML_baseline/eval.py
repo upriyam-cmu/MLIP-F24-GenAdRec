@@ -22,7 +22,7 @@ print("Using device:", device)
 
 # %%
 parser = argparse.ArgumentParser()
-parser.add_argument("--run_label", type=str)
+parser.add_argument("--run_label", type=str, default="")
 parser.add_argument("--eval_model_id", type=str)
 parser.add_argument("--conditional", action="store_true")
 parser.add_argument("--residual", action="store_true")
@@ -35,14 +35,16 @@ conditional = args.conditional
 residual = args.residual
 user_feats = args.user_feats
 
+if run_label == "":
+    run_label = '-'.join([
+        'conditional' if conditional else 'marginal',
+        'residual' if residual else 'independent',
+        'user_fts' if user_feats else 'uid_only',
+    ])
+
 # %%
 batch_size = 1024
-learning_rate = 0.001
-train_epochs = 30
-eval_every_n = 1
-save_every_n = 1
 model_dir = os.path.join("models", run_label)
-outputs_dir = os.path.join("outputs", run_label)
 
 # %%
 dataset_params = {
@@ -60,7 +62,11 @@ loss_eval_dataset = TaobaoDataset(mode="test", **dataset_params)
 validation_loader = DataLoader(loss_eval_dataset, batch_size=batch_size, shuffle=True)
 
 # %%
-test_dataset = TaobaoDataset(mode="test", **{**dataset_params, "ad_features": ["adgroup", "cate", "brand", "customer", "campaign"]})
+dataset_params = {
+    **dataset_params,
+    "ad_features": ["adgroup"] + dataset_params["ad_features"],
+}
+test_dataset = TaobaoDataset(mode="test", **dataset_params)
 ndcg_test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
 # %%
@@ -75,7 +81,9 @@ model = AdFeaturesPredictor(
 )
 
 # %%
-reduction_tracker = ReductionTracker(test_dataset.ad_features)
+ad_features = test_dataset.ad_features
+ad_features = ad_features[ad_features[:, 0] != -1]
+reduction_tracker = ReductionTracker(ad_features)
 
 print(f"eval only: loading model '{eval_model_id}' from path '{model_dir}'")
 model.load_state_dict(torch.load(os.path.join(model_dir, f"{eval_model_id}.pth"))['model_state_dict'])
