@@ -30,6 +30,9 @@ class AdEmbedder(nn.Module):
         x = []
         for feat, id in batch._asdict().items():
             if feat in self.embedding_modules.keys():
+                if id.min() == -1:
+                    # TODO: Deal properly with min(brand) == -1
+                    id = id + 1
                 x.append(self.embedding_modules[feat](id.to(torch.int32).to(self.device)))
         return torch.cat(x, axis=-1)
 

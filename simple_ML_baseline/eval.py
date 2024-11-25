@@ -81,12 +81,12 @@ model = AdFeaturesPredictor(
 )
 
 # %%
-ad_features = test_dataset.ad_features
-ad_features = ad_features[ad_features[:, 0] != -1]
-reduction_tracker = ReductionTracker(ad_features)
+ad_fts = test_dataset.ad_features
+ad_fts = ad_fts[ad_fts[:, 0] != -1]
+reduction_tracker = ReductionTracker(ad_fts)
 
 print(f"eval only: loading model '{eval_model_id}' from path '{model_dir}'")
-model.load_state_dict(torch.load(os.path.join(model_dir, f"{eval_model_id}.pth"))['model_state_dict'])
+model.load_state_dict(torch.load(os.path.join(model_dir, f"{eval_model_id}.pth"), map_location=device)['model_state_dict'])
 model.eval()
 
 sample_limit = 120

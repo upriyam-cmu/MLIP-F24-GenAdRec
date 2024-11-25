@@ -10,6 +10,8 @@ from typing import NamedTuple
 
 class AdBatch(NamedTuple):
     adgroup_id: np.array
+    cate_id: np.array
+    brand_id: np.array
     rel_ad_freqs: np.array
 
 
@@ -24,7 +26,7 @@ class TaobaoInteractionsSeqBatch(NamedTuple):
     timestamp: np.array
     is_padding: np.array
 
-MAX_SEQ_LEN = 200
+MAX_SEQ_LEN = 100
 
 class TaobaoDataset(Dataset):
 
@@ -83,23 +85,111 @@ class TaobaoDataset(Dataset):
                 conditional_map.index = list(zip(*[conditional_map[self.ad_feats[j]] for j in range(i)]))
                 self.conditional_mappings.append(conditional_map.to_dict()[self.ad_feats[i]])
         
-        interactions = pl.read_parquet(interactions_parquet)
+#         interactions = pl.read_parquet(interactions_parquet)
+#         if sequence_mode:
+#             self.user_data = interactions.select(self.user_feats).to_numpy().squeeze()
+#             self.seq_lens = interactions.select("seq_len").to_series().to_numpy()
+#             self.ads_data = [interactions.select(feat).to_series().to_numpy() for feat in (*self.ad_feats, "rel_ad_freq")]
+#             self.interaction_data = interactions.select("btag").to_series().to_numpy()
+#             self.timestamps = interactions.select("timestamp").to_series().to_numpy()
+#             self.padded_masks = interactions.select("padded_mask").to_series().to_numpy()
+#             self.test_indices = interactions.select("is_test").to_series().to_numpy()
+#             if self.mode != "test":
+#                 test_indices = np.nonzero(self.test_indices)
+#                 for ads_feat in self.ads_data:
+#                     ads_feat[test_indices] = 0
+#                 self.interaction_data[test_indices] = 0
+#                 self.timestamps[test_indices] = 0
+#                 self.padded_masks[test_indices] = True
+#                 self.seq_lens = self.seq_lens - 1
+
+        if mode == "pretrain":
+            raw_data = train_data.filter(pl.col("adgroup").is_null())
+        elif mode == "finetune":
+            raw_data = train_data.drop_nulls("adgroup")
+        elif mode == "train":
+            raw_data = train_data
+        elif mode == "test":
+            raw_data = pl.concat([
+                train_data.drop_nulls("adgroup").with_columns(pl.lit(0).alias("is_test")),
+                test_data.with_columns(pl.lit(1).alias("is_test")),
+            ])
+
+        # self.user_data = self.user_encoder.transform(raw_data.select(self.user_feats))
+        # self.ads_data = self.ad_encoder.transform(raw_data.select(self.ad_feats))
+        
+        # self.interaction_mapping = {-1: "non_ad_click", 0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
+        # self.interaction_data = raw_data.select("btag", "timestamp")
+        
+        # transformed_data = (pl
+        #     .concat([self.user_data, self.ads_data, self.interaction_data], how="horizontal")
+        #     .select(pl.all(), (pl.len().over("adgroup") / len(self.interaction_data)).cast(pl.Float32).alias("rel_ad_freq"))
+        # )
+        
         if sequence_mode:
-            self.user_data = interactions.select(self.user_feats).to_numpy().squeeze()
-            self.seq_lens = interactions.select("seq_len").to_series().to_numpy()
-            self.ads_data = [interactions.select(feat).to_series().to_numpy() for feat in (*self.ad_feats, "rel_ad_freq")]
-            self.interaction_data = interactions.select("btag").to_series().to_numpy()
-            self.timestamps = interactions.select("timestamp").to_series().to_numpy()
-            self.padded_masks = interactions.select("padded_mask").to_series().to_numpy()
-            self.test_indices = interactions.select("is_test").to_series().to_numpy()
-            if self.mode != "test":
-                test_indices = np.nonzero(self.test_indices)
-                for ads_feat in self.ads_data:
-                    ads_feat[test_indices] = 0
-                self.interaction_data[test_indices] = 0
-                self.timestamps[test_indices] = 0
-                self.padded_masks[test_indices] = True
-                self.seq_lens = self.seq_lens - 1
+            user_features.remove("user")
+            if mode != "test":
+                sequences = (raw_data
+                    .select(pl.all(), (pl.len().over("adgroup") / len(raw_data)).cast(pl.Float32).alias("rel_ad_freq"))
+                    .sort("user", "timestamp")
+                    .with_columns(pl.when(pl.col("btag") == -1).then(0).otherwise(1).alias("btag_zeroed"))
+                    .group_by_dynamic(
+                        index_column=pl.int_range(pl.len()),
+                        every="10i",
+                        period=f"{MAX_SEQ_LEN}i",
+                        by="user"
+                    )
+                    .agg(
+                        pl.col(user_features).first(),
+                        pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp"),
+                        pl.sum("btag_zeroed").alias("click_cnt"),
+                        seq_len=pl.col("btag").len()
+                    )
+                    .filter(pl.col("click_cnt") >= min_ad_clicks-1)
+                    .drop(["click_cnt", "literal"])
+                )
+
+            else:
+                sorted_data = (raw_data
+                    .select(pl.all(), (pl.len().over("adgroup") / len(raw_data)).cast(pl.Float32).alias("rel_ad_freq"))
+                    .sort(["user", "is_test", "timestamp"], descending=[False, True, True])
+                    .with_columns(
+                        (pl.col("timestamp").cum_count().over("user")-1).alias("row_num")
+                    )
+                    .with_columns((pl.col("row_num") // MAX_SEQ_LEN).alias("chunk_id"))
+                    .filter(pl.col("chunk_id") == 0)
+                    .sort("user", "timestamp", "is_test")
+                )
+
+                sequences = (sorted_data
+                    .group_by(["user", "chunk_id"],  maintain_order=True)
+                    .agg(
+                        pl.col(user_features).first(), 
+                        pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp"), 
+                        seq_len=pl.col("btag").len()
+                        )
+                    .drop("chunk_id")
+                )
+
+            max_seq_len = sequences.select(pl.col("seq_len").max()).item()
+            self.sequence_data = (sequences
+                .with_columns(pad_len=max_seq_len-pl.col("seq_len"))
+                .select(
+                    pl.col(self.user_feats),
+                    *(pl.col(feat).list.concat(
+                        pl.lit(0, dtype=pl.UInt32).repeat_by(pl.col("pad_len"))
+                    ).list.to_array(max_seq_len) for feat in [*self.ad_feats, "rel_ad_freq", "btag", "timestamp"]),
+                    padded_mask = pl.lit(False).repeat_by(pl.col("seq_len")).list.concat(
+                        pl.lit(True).repeat_by(pl.col("pad_len"))
+                    ).list.to_array(max_seq_len)
+                )
+            )
+            self.user_data = self.sequence_data.select(self.user_feats).to_numpy().squeeze()
+            self.ads_data = [self.sequence_data.select(feat).to_series().to_numpy() for feat in (*self.ad_feats, "rel_ad_freq")]
+            self.interaction_data = self.sequence_data.select("btag").to_series().to_numpy()
+            self.timestamps = self.sequence_data.select("timestamp").to_series().to_numpy()
+            self.padded_masks = self.sequence_data.select("padded_mask").to_series().to_numpy()
+
         else:
             if mode == "pretrain":
                 interactions = interactions.filter(pl.col("adgroup").is_null())
@@ -119,15 +209,27 @@ class TaobaoDataset(Dataset):
     
     @cached_property
     def n_users(self):
-        return len(self.user_profile["user"].unique())+1
+        return len(self.user_profile["user"].unique())
 
     @cached_property
     def n_ads(self):
-        return len(self.ad_feature["adgroup"].unique())+1
+        return len(self.ad_feature["adgroup"].unique())
+    
+    @cached_property
+    def n_brands(self):
+        return len(self.ad_feature["brand"].unique())
+
+    @cached_property
+    def n_cates(self):
+        return len(self.ad_feature["cate"].unique())
     
     def get_index(self):
-        ad_index = torch.arange(self.n_ads)
-        return AdBatch(adgroup_id=ad_index, rel_ad_freqs=None)
+        transformed_ad_feats = self.ad_encoder.transform(self.ad_feature).sort("adgroup")
+        batch = []
+        for feat_name in self.ad_feats:
+            batch.append(torch.tensor(transformed_ad_feats[feat_name].to_numpy()))
+        batch.append(None)
+        return AdBatch(*batch)
     
     def __len__(self):
         return len(self.timestamps)

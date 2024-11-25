@@ -39,23 +39,27 @@ class TwoTowerModel(nn.Module):
         
         pos_mask = (batch.is_click == 1).to(self.device)
         pos_emb = user_embedding[pos_mask]
-        target_emb, neg_emb = ad_embedding[pos_mask], ad_embedding[~pos_mask]
+        target_emb, neg_emb = ad_embedding[pos_mask], ad_embedding
         ad_ids = batch.ad_feats.adgroup_id.squeeze(0).to(torch.int32).to(self.device)
         user_ids = batch.user_feats.user.squeeze(0).to(torch.int32).to(self.device)
 
-        miss = (ad_ids[pos_mask].unsqueeze(1) != ad_ids[~pos_mask])
-        same_user = (user_ids[pos_mask].unsqueeze(1) == user_ids[~pos_mask])
-        same_user = (same_user | (same_user.sum(axis=1) == 0).unsqueeze(1))
-        miss = (miss & same_user & ((~miss).sum(axis=0) == 0)).to(torch.float32)
-        q_probas = batch.ad_feats.q_proba.squeeze(0).to(torch.float32).to(self.device)
+        miss = (ad_ids[pos_mask].unsqueeze(1) != ad_ids)
 
+        #same_user = (user_ids[pos_mask].unsqueeze(1) == user_ids)
+        #miss = (((~miss).sum(axis=0) == 0).unsqueeze(0).repeat(miss.shape[0],1) & (~pos_mask)) | (~same_user & pos_mask & miss)
+        #same_user = (same_user | (same_user.sum(axis=1) == 0).unsqueeze(1))
+        #miss = (miss & same_user & ((~miss).sum(axis=0) == 0)).to(torch.float32)
+    
+        miss = miss.to(torch.float32)
+        q_probas = batch.ad_feats.q_proba.squeeze(0).to(torch.float32).to(self.device)
         # In-batch softmax. Maybe TODO: Use random index
+
         batch_loss = self.sampled_softmax.forward(
             pos_emb=pos_emb,
             target_emb=target_emb,
             neg_emb=neg_emb,
             pos_q_probas=q_probas[pos_mask],
-            neg_q_probas=q_probas[~pos_mask],
+            neg_q_probas=q_probas,
             pos_neg_mask=miss
         )
         #print(f"Forward: {end - start}")

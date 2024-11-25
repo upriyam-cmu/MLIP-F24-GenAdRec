@@ -20,9 +20,9 @@ class UserBatch(NamedTuple):
 
 class AdBatch(NamedTuple):
     adgroup_id: torch.Tensor
-    #cate_id: torch.Tensor
-    #campaign_id: torch.Tensor
-    #brand: torch.Tensor
+    # cate_id: torch.Tensor
+    # campaign_id: torch.Tensor
+    # brand: torch.Tensor
     q_proba: torch.Tensor
 
 
@@ -165,7 +165,7 @@ class InteractionsDataset(Dataset):
     
     def with_ads_occ_proba(self, data):
         cnt = data.groupby("adgroup_id")["clk"].count().reset_index().rename({"clk": "q_proba"}, axis="columns")
-        cnt["q_proba"] = cnt["q_proba"] / len(self)
+        cnt["q_proba"] = cnt["q_proba"] / len(data)
         return data.merge(
             cnt,
             on="adgroup_id"

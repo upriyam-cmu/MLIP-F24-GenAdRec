@@ -15,6 +15,7 @@ setup(
         'pandas',
         'polars',
         'pyarrow',
+        "minGRU-pytorch",
     ],
     author="",
     author_email="",

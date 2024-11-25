@@ -43,6 +43,8 @@ class Trainer:
                  save_model_every_n: int = 5,
                  max_grad_norm: int = 1,
                  embedder_hidden_dims: Optional[List[int]] = [1024, 512, 128],
+                 seq_rnn_cell_type: str = "GRU",
+                 seq_rnn_num_layers: int = 2,
                  force_dataset_reload: bool = False,
                  checkpoint_path: Optional[str] = None,
                  save_dir_root: str = "out/"
@@ -57,6 +59,8 @@ class Trainer:
         self.train_eval_every_n = train_eval_every_n
         self.save_model_every_n = save_model_every_n
         self.embedder_hidden_dims = embedder_hidden_dims
+        self.seq_rnn_cell_type = seq_rnn_cell_type
+        self.seq_rnn_num_layers = seq_rnn_num_layers
         self.force_dataset_reload = force_dataset_reload
         self.checkpoint_path = checkpoint_path
         self.save_dir_root = save_dir_root
@@ -107,7 +111,7 @@ class Trainer:
                 mode="finetune",
                 sequence_mode=True,
                 user_features=["user"],  # ["user", "gender", "age", "shopping", "occupation"],
-                ad_features=["adgroup"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
+                ad_features=["adgroup", "cate", "brand"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
                 conditional_masking=False
             )
 
@@ -120,7 +124,7 @@ class Trainer:
                 mode="test",
                 sequence_mode=True,
                 user_features=["user"],  # ["user", "gender", "age", "shopping", "occupation"],
-                ad_features=["adgroup"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
+                ad_features=["adgroup", "cate", "brand"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
                 conditional_masking=False
             )
 
@@ -129,10 +133,15 @@ class Trainer:
 
             self.model = RNNSeqModel(
                 n_users=self.train_dataset.n_users,
-                ad_categorical_feats=[CategoricalFeature("adgroup_id", self.train_dataset.n_ads)],
-                cell_type="GRU",
+                ad_categorical_feats=[
+                    #CategoricalFeature("adgroup_id", self.train_dataset.n_ads),
+                    CategoricalFeature("brand_id", self.train_dataset.n_brands),
+                    CategoricalFeature("cate_id", self.train_dataset.n_cates),
+                ],
+                cell_type=self.seq_rnn_cell_type,
                 rnn_input_size=self.embedding_dim,
                 rnn_hidden_size=self.embedding_dim,
+                rnn_num_layers=self.seq_rnn_num_layers,
                 device=self.device,
                 embedder_hidden_dims=self.embedder_hidden_dims,
                 rnn_batch_first=True
@@ -147,8 +156,20 @@ class Trainer:
                         optimizer: Module = None,
                         sparse_optimizer: Module = None) -> LoadedCheckpoint:
         state = torch.load(path)
-        if model is None:
+        if model is None and self.model_type == ModelType.TWO_TOWER:
             model = TwoTowerModel(ads_categorical_features=self.train_dataset.categorical_features, ads_hidden_dims=self.embedder_hidden_dims, n_users=self.train_dataset.n_users, embedding_dim=self.embedding_dim, use_user_ids=True, device=self.device)
+        if model is None and self.model_type == ModelType.SEQ:
+            self.model = RNNSeqModel(
+                n_users=self.train_dataset.n_users,
+                ad_categorical_feats=[CategoricalFeature("adgroup_id", self.train_dataset.n_ads)],
+                cell_type=self.seq_rnn_cell_type,
+                rnn_input_size=self.embedding_dim,
+                rnn_hidden_size=self.embedding_dim,
+                rnn_num_layers=self.seq_rnn_num_layers,
+                device=self.device,
+                embedder_hidden_dims=self.embedder_hidden_dims,
+                rnn_batch_first=True
+            )
         
         model.load_state_dict(state["model"])
         if optimizer is not None:
@@ -262,8 +283,8 @@ def accumulate_metrics(query, target, index, ks, metrics=None):
 if __name__ == "__main__":
     trainer = Trainer(
         model_type=ModelType.SEQ,
-        learning_rate=0.0005,
-        eval_batch_size=256,
+        learning_rate=0.001, # 0.0005 for two_tower
+        eval_batch_size=1024,
         train_batch_size=32,
         embedding_dim=32,
         force_dataset_reload=False
