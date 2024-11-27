@@ -40,18 +40,16 @@ class TaobaoDataset(Dataset):
         assert not (conditional_masking and sequence_mode), "Can only support one of conditional masking and sequence mode at a time"
         assert "user" in user_features, f"Missing user id in user features: {user_features}"
         assert "adgroup" in ad_features, f"Missing ad id in ad features: {ad_features}"
-        
+
         user_profile_parquet = os.path.join(data_dir, f"user_profile_{min_ad_clicks}.parquet")
         ad_feature_parquet = os.path.join(data_dir, f"ad_feature_{min_ad_clicks}.parquet")
         train_parquet = os.path.join(data_dir, f"train_{min_ad_clicks}.parquet")
         test_parquet = os.path.join(data_dir, f"test_{min_ad_clicks}.parquet")
-        interactions_parquet = os.path.join(data_dir, f"interaction_seq_{min_ad_clicks}.parquet" if sequence_mode else f"interactions_{min_ad_clicks}.parquet")
-        
+
         assert os.path.isfile(user_profile_parquet), f"Cannot find user_profile file {user_profile_parquet}. Please generate using data_preprocess_encode.ipynb"
         assert os.path.isfile(ad_feature_parquet), f"Cannot find ad_feature file {ad_feature_parquet}. Please generate using data_preprocess_encode.ipynb"
         assert os.path.isfile(train_parquet), f"Cannot find train data file {train_parquet}. Please generate using data_preprocess.ipynb"
         assert os.path.isfile(test_parquet), f"Cannot find test data file {test_parquet}. Please generate using data_preprocess.ipynb"
-        assert os.path.isfile(interactions_parquet), f"Cannot find interactions file {interactions_parquet}. Please generate using data_preprocess.ipynb"
 
         self.mode = mode
         self.interaction_mapping = {-1: "ad_non_click" ,0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
@@ -77,7 +75,7 @@ class TaobaoDataset(Dataset):
         if self.conditional_masking:
             polars_transformed_ad_feats: pl.DataFrame = self.ad_encoder.transform(self.ad_feature)
             self.ad_features = polars_transformed_ad_feats.unique().to_numpy()
-        
+
             self.conditional_mappings = []
             for i in range(1, len(self.ad_feats)):
                 conditional_map = (
@@ -91,24 +89,6 @@ class TaobaoDataset(Dataset):
                 )
                 conditional_map.index = list(zip(*[conditional_map[self.ad_feats[j]] for j in range(i)]))
                 self.conditional_mappings.append(conditional_map.to_dict()[self.ad_feats[i]])
-        
-        interactions = pl.read_parquet(interactions_parquet)
-#         if sequence_mode:
-#             self.user_data = interactions.select(self.user_feats).to_numpy().squeeze()
-#             self.seq_lens = interactions.select("seq_len").to_series().to_numpy()
-#             self.ads_data = [interactions.select(feat).to_series().to_numpy() for feat in (*self.ad_feats, "rel_ad_freq")]
-#             self.interaction_data = interactions.select("btag").to_series().to_numpy()
-#             self.timestamps = interactions.select("timestamp").to_series().to_numpy()
-#             self.padded_masks = interactions.select("padded_mask").to_series().to_numpy()
-#             self.test_indices = interactions.select("is_test").to_series().to_numpy()
-#             if self.mode != "test":
-#                 test_indices = np.nonzero(self.test_indices)
-#                 for ads_feat in self.ads_data:
-#                     ads_feat[test_indices] = 0
-#                 self.interaction_data[test_indices] = 0
-#                 self.timestamps[test_indices] = 0
-#                 self.padded_masks[test_indices] = True
-#                 self.seq_lens = self.seq_lens - 1
 
         if mode == "pretrain":
             raw_data = train_data.filter(pl.col("adgroup").is_null())
@@ -121,7 +101,7 @@ class TaobaoDataset(Dataset):
                 train_data.drop_nulls("adgroup").with_columns(pl.lit(0).alias("is_test")),
                 test_data.with_columns(pl.lit(1).alias("is_test")),
             ])
-        
+
         if sequence_mode:
             user_features.remove("user")
             if mode != "test":
@@ -187,24 +167,14 @@ class TaobaoDataset(Dataset):
             self.padded_masks = self.sequence_data.select("padded_mask").to_series().to_numpy()
 
         else:
-            if mode == "pretrain":
-                interactions = interactions.filter(pl.col("adgroup").is_null())
-            elif mode == "finetune":
-                interactions = interactions.drop_nulls("adgroup").filter(~pl.col("is_test"))
-            elif mode == "train":
-                interactions = interactions.filter(~pl.col("is_test"))
-            elif mode == "test":
-                interactions = interactions.filter(pl.col("is_test"))
-            
-            self.user_data = interactions.select(self.user_feats).to_numpy().squeeze()
-            self.ads_data = interactions.select(self.ad_feats).to_numpy().squeeze()
-            self.interaction_data = interactions.select("btag").to_series().to_numpy()
-            self.timestamps = interactions.select("timestamp").to_series().to_numpy()
+            self.user_data = raw_data.select(self.user_feats).to_numpy().squeeze()
+            self.ads_data = raw_data.select(self.ad_feats).to_numpy().squeeze()
+            self.interaction_data = raw_data.select("btag").to_series().to_numpy()
+            self.timestamps = raw_data.select("timestamp").to_series().to_numpy()
         
         del raw_data
         del train_data
         del test_data
-        del interactions
     
     @cached_property
     def n_users(self):
@@ -236,7 +206,6 @@ class TaobaoDataset(Dataset):
     def __getitem__(self, idx):
         if self.sequence_mode:
             max_batch_len = (~self.padded_masks[idx]).sum(axis=1).max()
-            # max_batch_len = self.seq_lens[idx].max()
             return TaobaoInteractionsSeqBatch(
                 UserBatch(self.user_data[idx].astype(np.int32)),
                 AdBatch(*([ads_feat[idx, :max_batch_len] for ads_feat in self.ads_data])),
