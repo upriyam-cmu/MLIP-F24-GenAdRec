@@ -3,8 +3,8 @@ import os
 import torch
 import numpy as np
 import argparse
-from taobao_behavior_dataset_old import TaobaoUserClicksDataset
-from ad_features_predictor import AdFeaturesPredictor
+from dataset.taobao_behavior_dataset_old import TaobaoUserClicksDataset
+from model.ad_features_predictor import AdFeaturesPredictor
 from torch.optim import AdamW
 import torch.nn.functional as F
 from tqdm import tqdm

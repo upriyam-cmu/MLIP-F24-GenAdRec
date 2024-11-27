@@ -6,8 +6,8 @@ from embedding.ads import AdTower
 from itertools import chain
 from loss.softmax import SampledSoftmaxLoss
 from model.seq import RNN
-from simple_ML_baseline.taobao_behavior_dataset import AdBatch
-from simple_ML_baseline.taobao_behavior_dataset import TaobaoInteractionsSeqBatch
+from dataset.taobao_behavior_dataset import AdBatch
+from dataset.taobao_behavior_dataset import TaobaoInteractionsSeqBatch
 from typing import List
 
 

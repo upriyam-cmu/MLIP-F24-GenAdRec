@@ -5,9 +5,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import argparse
-from taobao_behavior_dataset import TaobaoUserClicksDataset
-from ad_features_predictor import AdFeaturesPredictor
-from masked_cross_entropy_loss import MaskedCrossEntropyLoss
+from dataset.taobao_behavior_dataset import TaobaoUserClicksDataset
+from model.ad_features_predictor import AdFeaturesPredictor
+from loss.masked_cross_entropy_loss import MaskedCrossEntropyLoss
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from tqdm import tqdm

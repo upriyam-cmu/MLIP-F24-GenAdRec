@@ -17,7 +17,7 @@ from typing import NamedTuple
 from typing import Optional
 from typing import List
 from sequence_model.model import RNNSeqModel
-from simple_ML_baseline.taobao_behavior_dataset import TaobaoDataset
+from dataset.taobao_behavior_dataset import TaobaoDataset
 
 
 class LoadedCheckpoint(NamedTuple):

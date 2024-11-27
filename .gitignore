@@ -7,7 +7,7 @@ template/
 .DS_Store
 .venv
 venv
-models
+saved_models
 __pycache__
 outputs
 .vscode
