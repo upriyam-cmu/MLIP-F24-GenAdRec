@@ -78,7 +78,7 @@ class Trainer:
     def _init(self):
         if self.model_type == ModelType.TWO_TOWER:
             self.train_dataset = InteractionsDataset(
-                path="data/",
+                path="raw_data/",
                 is_train=True,
                 force_reload=self.force_dataset_reload
             )
@@ -87,7 +87,7 @@ class Trainer:
             self.train_dataloader = DataLoader(self.train_dataset, sampler=sampler, batch_size=None)
             
             self.eval_dataset = InteractionsDataset(
-                path="data/",
+                path="raw_data/",
                 is_train=False,
                 force_reload=self.force_dataset_reload
             )
@@ -106,7 +106,7 @@ class Trainer:
         
         elif self.model_type == ModelType.SEQ:
             self.train_dataset = TaobaoDataset(
-                data_dir="data",
+                data_dir="raw_data",
                 min_ad_clicks=5,
                 mode="finetune",
                 sequence_mode=True,
@@ -119,7 +119,7 @@ class Trainer:
             self.train_dataloader = DataLoader(self.train_dataset, sampler=sampler, batch_size=None)
 
             self.eval_dataset = TaobaoDataset(
-                data_dir="data",
+                data_dir="raw_data",
                 min_ad_clicks=5,
                 mode="test",
                 sequence_mode=True,

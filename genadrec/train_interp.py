@@ -50,7 +50,7 @@ outputs_dir = os.path.join("outputs", run_label)
 
 # %%
 dataset_params = {
-    "data_dir": "../data",
+    "data_dir": "raw_data",
     "filter_clicks": True,
     "include_user_ids": True,
     "user_features": ["final_gender_code", "age_level", "shopping_level", "occupation"] if user_feats else [],

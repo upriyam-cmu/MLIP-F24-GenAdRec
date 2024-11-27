@@ -48,7 +48,7 @@ model_dir = os.path.join("models", run_label)
 
 # %%
 dataset_params = {
-    "data_dir": "../data",
+    "data_dir": "raw_data",
     "min_train_clks": 1,
     "num_test_clks": 1,
     "include_ad_non_clks": False,

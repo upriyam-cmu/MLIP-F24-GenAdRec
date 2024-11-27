@@ -1,4 +1,5 @@
 archive
+raw_data
 data
 **/__pycache__/
 *.egg-info/

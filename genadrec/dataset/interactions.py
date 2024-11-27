@@ -64,9 +64,9 @@ class InteractionsDataset(Dataset):
     
         if force_reload or not train_file_exists or not eval_file_exists:
             print("Reloading dataset...")
-            self.raw_sample = pd.read_csv("data/raw_sample.csv").drop(columns=["pid", "nonclk"])
-            self.user_profile = pd.read_csv("data/user_profile.csv").rename({"userid": "user"}, axis="columns")
-            self.ad_feature = pd.read_csv("data/ad_feature.csv")
+            self.raw_sample = pd.read_csv("raw_data/raw_sample.csv").drop(columns=["pid", "nonclk"])
+            self.user_profile = pd.read_csv("raw_data/user_profile.csv").rename({"userid": "user"}, axis="columns")
+            self.ad_feature = pd.read_csv("raw_data/ad_feature.csv")
 
             self.data = self._dedup_interactions(self.raw_sample)
             train_test_split = self._train_test_split(self.data)
@@ -87,13 +87,13 @@ class InteractionsDataset(Dataset):
             self.data = self.encode_categories(self.train_data, self.data)
 
             self.data.to_parquet(path + self.TRAIN_FILENAME if is_train else path + self.EVAL_FILENAME)
-            self.ad_feature.to_parquet("data/ad_feature.parquet")
+            self.ad_feature.to_parquet("raw_data/ad_feature.parquet")
         
         else:
             self.train_data = pq.read_table(source=path + self.TRAIN_FILENAME).to_pandas()
             data_file_path = path + self.TRAIN_FILENAME if self.is_train else path + self.EVAL_FILENAME
             self.data = pq.read_table(source=data_file_path).to_pandas()
-            self.ad_feature = pq.read_table(source="data/ad_feature.parquet").to_pandas()
+            self.ad_feature = pq.read_table(source="raw_data/ad_feature.parquet").to_pandas()
 
         if shuffle:
             self.data = self.data.iloc[np.random.permutation(np.arange(len(self.data)))].reset_index().drop(columns="index")
