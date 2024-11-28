@@ -52,113 +52,7 @@ class TaobaoSequenceDataset(Dataset):
         self.ad_feats = ["adgroup", "cate", "brand", "customer", "campaign"]
         self.full_ad_feats = self.ad_feats + ["rel_ad_freq", "btag", "timestamp", "is_test"]
         self.selected_feats = [*self.user_feats, *self.full_ad_feats, "seq_len"]
-
-        sequence_params = f"timediff{min_timediff_unique}_mintrain{min_training_interactions}_seqlen{sequence_len}_slide{slide_window_every}"
-        if force_reload:
-            train_parquet = os.path.join(data_dir, "train.parquet")
-            test_parquet = os.path.join(data_dir, "test.parquet")
-            assert os.path.isfile(train_parquet), f"Cannot find train data file {train_parquet}. Please generate using data_process notebooks"
-            assert os.path.isfile(test_parquet), f"Cannot find test data file {test_parquet}. Please generate using data_process notebooks"
-
-            training_data = (pl.scan_parquet(train_parquet)
-                .filter(pl.col("timediff").is_null() | (pl.col("timediff") >= min_timediff_unique))
-                .filter(pl.len().over("user") >= min_training_interactions)
-                .collect()
-            )
-            validation_data = (pl.scan_parquet(test_parquet)
-                .filter(pl.col("user").is_in(training_data.select("user").unique()))
-                .collect()
-            )
-            interactions: pl.DataFrame = pl.concat([training_data, validation_data], how="vertical", rechunk=True)
-            del training_data, validation_data
-
-            rel_ad_freqs = (interactions
-                .filter(pl.col("adgroup") > -1)
-                .select("adgroup", rel_ad_freq = (pl.len().over("adgroup") / pl.count("adgroup")).cast(pl.Float32))
-                .unique()
-            )
-            sequences = (interactions
-                .join(rel_ad_freqs, on="adgroup", how="left")
-                .with_columns(pl.col("rel_ad_freq").fill_null(0.0))
-                .group_by("user")
-                .agg(
-                    pl.col(self.user_feats[1:]).first(),
-                    pl.col(self.full_ad_feats).sort_by("timestamp"),
-                    seq_len = pl.col("btag").len().cast(pl.Int32)
-                )
-                .with_columns(pl.col("timestamp").list.diff().list.eval(pl.element().fill_null(0)))
-            )
-            del interactions, rel_ad_freqs
-
-            max_seq_len = sequences.select(pl.col("seq_len").max()).item()
-            train_sequences = (pl
-                .concat([
-                    (sequences
-                        .filter(pl.col("seq_len") > abs(end_idx))
-                        .select(
-                            pl.col(self.user_feats),
-                            pl.col(self.full_ad_feats)
-                                .list.gather(range(end_idx-sequence_len, end_idx), null_on_oob=True)
-                                .list.shift(pl.min_horizontal(pl.col("seq_len") + (end_idx-sequence_len), 0)),
-                            seq_len = pl.min_horizontal(pl.col("seq_len") + end_idx, sequence_len).cast(pl.Int32)
-                        )
-                    ) for end_idx in range(-1, -max_seq_len, -slide_window_every)
-                ], how="vertical")
-                .filter(pl.col("seq_len") >= min_training_interactions)
-                .with_columns(
-                    pl.col(self.ad_feats).list.eval(pl.element().fill_null(-1)).list.to_array(sequence_len),
-                    pl.col("rel_ad_freq").list.eval(pl.element().fill_null(0.0)).list.to_array(sequence_len),
-                    pl.col("btag").list.eval(pl.element().fill_null(-2)).list.to_array(sequence_len),
-                    pl.col("timestamp").list.eval(pl.element().fill_null(0)).list.to_array(sequence_len),
-                    pl.col("is_test").list.eval(pl.element().fill_null(True)).list.to_array(sequence_len),
-                )
-            )
-            train_sequences.write_parquet(os.path.join(data_dir, f"train_sequences_{sequence_params}.parquet"))
-            if is_train:
-                sequences = train_sequences.select(self.selected_feats).rechunk()
-                del train_sequences
-
-            test_sequences = (sequences
-                .select(
-                    pl.col(self.user_feats),
-                    pl.col(self.full_ad_feats)
-                        .list.gather(range(-sequence_len, 0), null_on_oob=True)
-                        .list.shift(pl.min_horizontal(pl.col("seq_len") - sequence_len, 0)),
-                    seq_len = pl.min_horizontal(pl.col("seq_len"), sequence_len).cast(pl.Int32)
-                )
-                .with_columns(
-                    pl.col(self.ad_feats).list.eval(pl.element().fill_null(-1)).list.to_array(sequence_len),
-                    pl.col("rel_ad_freq").list.eval(pl.element().fill_null(0.0)).list.to_array(sequence_len),
-                    pl.col("btag").list.eval(pl.element().fill_null(-2)).list.to_array(sequence_len),
-                    pl.col("timestamp").list.eval(pl.element().fill_null(0)).list.to_array(sequence_len),
-                    pl.col("is_test").list.eval(pl.element().fill_null(True)).list.to_array(sequence_len),
-                )
-            )
-            test_sequences.write_parquet(os.path.join(data_dir, f"test_sequences_{sequence_params}.parquet"))
-            if not is_train:
-                sequences = test_sequences.select(self.selected_feats).rechunk()
-                del test_sequences
-
-        else:
-            train_seq_parquet = os.path.join(data_dir, f"train_sequences_{sequence_params}.parquet")
-            test_seq_parquet = os.path.join(data_dir, f"test_sequences_{sequence_params}.parquet")
-            assert os.path.isfile(train_seq_parquet), f"Cannot find train sequences file {train_seq_parquet}. Please generate by setting force_reload=True"
-            assert os.path.isfile(test_seq_parquet), f"Cannot find test sequences file {test_seq_parquet}. Please generate by setting force_reload=True"
-            if is_train:
-                sequences = (pl
-                    .scan_parquet(train_seq_parquet)
-                    .select(self.selected_feats)
-                    .collect()
-                    .rechunk()
-                )
-            else:
-                sequences = (pl
-                    .scan_parquet(test_seq_parquet)
-                    .select(self.selected_feats)
-                    .collect()
-                    .rechunk()
-                )
-
+        
         self.interaction_mapping = {-1: "ad_non_click" ,0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
 
         self.user_profile = pl.scan_parquet(user_profile_parquet).select(self.user_feats).unique().collect()
@@ -169,14 +63,26 @@ class TaobaoSequenceDataset(Dataset):
         self.ad_encoder = OrdinalEncoder(dtype=np.int32, encoded_missing_value=-1).fit(self.ad_feature)
         self.ad_encoder.set_output(transform="polars")
 
-        self.user_data = sequences.select(self.user_feats).to_numpy()
-        self.ads_data = [sequences[feat].to_numpy() for feat in self.ad_feats]
-        self.rel_ad_freqs = sequences["rel_ad_freqs"].to_numpy()
-        self.interaction_data = sequences["btag"].to_numpy()
-        self.timestamps = sequences["timestamp"].to_numpy()
-        self.padded_masks = sequences["is_test"].to_numpy()
-        self.seq_lens = sequences["seq_len"].to_numpy()
-        del sequences
+        sequence_params = f"timediff{min_timediff_unique}_mintrain{min_training_interactions}_seqlen{sequence_len}_slide{slide_window_every}"
+        
+        train_file = os.path.join(data_dir, f"train_data_{sequence_params}.npz")
+        test_file = os.path.join(data_dir, f"test_data_{sequence_params}.npz")
+        assert os.path.isfile(train_file), f"Cannot find training data {train_file}. Please generate with data_process notebooks"
+        assert os.path.isfile(test_file), f"Cannot find test data {test_file}. Please generate with data_process notebooks"
+        
+        if is_train:
+            data = np.load(train_file)
+        else:
+            data = np.load(test_file)
+
+        self.user_data = data["user_data"]
+        self.ads_data = [data[feat] for feat in self.ad_feats]
+        self.rel_ad_freqs = data["rel_ad_freqs"]
+        self.interaction_data = data["interaction_data"]
+        self.timestamps = data["timestamps"]
+        self.padded_masks = data["padded_masks"]
+        self.seq_lens = data["seq_lens"]
+        del data
 
 
     @cached_property
