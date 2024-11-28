@@ -23,24 +23,23 @@ class UserBatch(NamedTuple):
 
 class TaobaoInteractionsSeqBatch(NamedTuple):
     user_feats: UserBatch
-    ad_feats: np.array
+    ad_feats: AdBatch
     is_click: np.array
     timestamp: np.array
     is_padding: np.array
 
-MAX_SEQ_LEN = 100
 
 class TaobaoSequenceDataset(Dataset):
 
     def __init__(
-        self, data_dir: str, 
+        self, data_dir: str,
         is_train: bool = True,
         min_timediff_unique: int = 30,       # The minimum number of seconds between identical interactions (user, adgroup, btag), or (user, cate, brand, btag), before they are considered duplicates
         min_training_interactions: int = 5,  # The minimum number of non-ad-click, browse, ad-click, favorite, add-to-cart, or purchase interactions required in a training sequence
         sequence_len: int = 100,
         slide_window_every: int = 100,
-        user_features: list[str] = ["user", "gender", "age", "shopping", "occupation"],    # all features by default
-        ad_features: list[str] = ["adgroup", "cate", "brand", "customer", "campaign"],     # all features by default
+        # user_features: list[str] = ["user", "gender", "age", "shopping", "occupation"],    # all features by default
+        # ad_features: list[str] = ["adgroup", "cate", "brand", "customer", "campaign"],     # all features by default
         force_reload: bool = False,
     ):
         user_profile_parquet = os.path.join(data_dir, f"user_profile.parquet")
@@ -49,9 +48,10 @@ class TaobaoSequenceDataset(Dataset):
         assert os.path.isfile(ad_feature_parquet), f"Cannot find ad_feature file {ad_feature_parquet}. Please generate using data_process notebooks"
 
         self.is_train = is_train
-        self.user_feats = user_features
-        self.ad_feats = ad_features
-        self.selected_feats = [*user_features, *ad_features, "rel_ad_freq", "btag", "timestamp", "is_test", "seq_len"]
+        self.user_feats = ["user", "gender", "age", "shopping", "occupation"]
+        self.ad_feats = ["adgroup", "cate", "brand", "customer", "campaign"]
+        self.full_ad_feats = self.ad_feats + ["rel_ad_freq", "btag", "timestamp", "is_test"]
+        self.selected_feats = [*self.user_feats, *self.full_ad_feats, "seq_len"]
 
         sequence_params = f"timediff{min_timediff_unique}_mintrain{min_training_interactions}_seqlen{sequence_len}_slide{slide_window_every}"
         if force_reload:
@@ -71,7 +71,7 @@ class TaobaoSequenceDataset(Dataset):
             )
             interactions: pl.DataFrame = pl.concat([training_data, validation_data], how="vertical", rechunk=True)
             del training_data, validation_data
-            
+
             rel_ad_freqs = (interactions
                 .filter(pl.col("adgroup") > -1)
                 .select("adgroup", rel_ad_freq = (pl.len().over("adgroup") / pl.count("adgroup")).cast(pl.Float32))
@@ -82,8 +82,8 @@ class TaobaoSequenceDataset(Dataset):
                 .with_columns(pl.col("rel_ad_freq").fill_null(0.0))
                 .group_by("user")
                 .agg(
-                    pl.col("gender", "age", "shopping", "occupation").first(),
-                    pl.col("adgroup", "cate", "brand", "customer", "campaign", "rel_ad_freq", "btag", "timestamp", "is_test").sort_by("timestamp"),
+                    pl.col(self.user_feats[1:]).first(),
+                    pl.col(self.full_ad_feats).sort_by("timestamp"),
                     seq_len = pl.col("btag").len().cast(pl.Int32)
                 )
                 .with_columns(pl.col("timestamp").list.diff().list.eval(pl.element().fill_null(0)))
@@ -96,8 +96,8 @@ class TaobaoSequenceDataset(Dataset):
                     (sequences
                         .filter(pl.col("seq_len") > abs(end_idx))
                         .select(
-                            pl.col("user", "gender", "age", "shopping", "occupation"),
-                            pl.col("adgroup", "cate", "brand", "customer", "campaign", "rel_ad_freq", "btag", "timestamp", "is_test")
+                            pl.col(self.user_feats),
+                            pl.col(self.full_ad_feats)
                                 .list.gather(range(end_idx-sequence_len, end_idx), null_on_oob=True)
                                 .list.shift(pl.min_horizontal(pl.col("seq_len") + (end_idx-sequence_len), 0)),
                             seq_len = pl.min_horizontal(pl.col("seq_len") + end_idx, sequence_len).cast(pl.Int32)
@@ -106,7 +106,7 @@ class TaobaoSequenceDataset(Dataset):
                 ], how="vertical")
                 .filter(pl.col("seq_len") >= min_training_interactions)
                 .with_columns(
-                    pl.col("adgroup", "cate", "brand", "customer", "campaign").list.eval(pl.element().fill_null(-1)).list.to_array(sequence_len),
+                    pl.col(self.ad_feats).list.eval(pl.element().fill_null(-1)).list.to_array(sequence_len),
                     pl.col("rel_ad_freq").list.eval(pl.element().fill_null(0.0)).list.to_array(sequence_len),
                     pl.col("btag").list.eval(pl.element().fill_null(-2)).list.to_array(sequence_len),
                     pl.col("timestamp").list.eval(pl.element().fill_null(0)).list.to_array(sequence_len),
@@ -117,17 +117,17 @@ class TaobaoSequenceDataset(Dataset):
             if is_train:
                 sequences = train_sequences.select(self.selected_feats).rechunk()
                 del train_sequences
-            
+
             test_sequences = (sequences
                 .select(
-                    pl.col("user", "gender", "age", "shopping", "occupation"),
-                    pl.col("adgroup", "cate", "brand", "customer", "campaign", "rel_ad_freq", "btag", "timestamp", "is_test")
+                    pl.col(self.user_feats),
+                    pl.col(self.full_ad_feats)
                         .list.gather(range(-sequence_len, 0), null_on_oob=True)
                         .list.shift(pl.min_horizontal(pl.col("seq_len") - sequence_len, 0)),
                     seq_len = pl.min_horizontal(pl.col("seq_len"), sequence_len).cast(pl.Int32)
                 )
                 .with_columns(
-                    pl.col("adgroup", "cate", "brand", "customer", "campaign").list.eval(pl.element().fill_null(-1)).list.to_array(sequence_len),
+                    pl.col(self.ad_feats).list.eval(pl.element().fill_null(-1)).list.to_array(sequence_len),
                     pl.col("rel_ad_freq").list.eval(pl.element().fill_null(0.0)).list.to_array(sequence_len),
                     pl.col("btag").list.eval(pl.element().fill_null(-2)).list.to_array(sequence_len),
                     pl.col("timestamp").list.eval(pl.element().fill_null(0)).list.to_array(sequence_len),
@@ -187,7 +187,7 @@ class TaobaoSequenceDataset(Dataset):
     def n_ads(self):
         # adgroups have nulls encoded as -1s
         return len(self.ad_feature["adgroup"].unique())-1
-    
+
     @cached_property
     def n_brands(self):
         # brands have nulls encoded as -1s
@@ -196,7 +196,7 @@ class TaobaoSequenceDataset(Dataset):
     @cached_property
     def n_cates(self):
         return len(self.ad_feature["cate"].unique())
-    
+
     def get_index(self):
         transformed_ad_feats: pl.DataFrame = self.ad_encoder.transform(self.ad_feature).sort("adgroup")
         batch = []
@@ -204,10 +204,10 @@ class TaobaoSequenceDataset(Dataset):
             batch.append(torch.tensor(transformed_ad_feats[feat_name].to_numpy()))
         batch.append(None)
         return AdBatch(*batch)
-    
+
     def __len__(self):
         return len(self.seq_lens)
-    
+
     def __getitem__(self, idx):
         max_batch_len = self.seq_lens[idx].max()
         return TaobaoInteractionsSeqBatch(
