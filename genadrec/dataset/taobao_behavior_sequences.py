@@ -12,6 +12,8 @@ class AdBatch(NamedTuple):
     adgroup_id: np.array
     cate_id: np.array
     brand_id: np.array
+    customer_id: np.array
+    campaign_id: np.array
     rel_ad_freqs: np.array
 
 
@@ -28,172 +30,175 @@ class TaobaoInteractionsSeqBatch(NamedTuple):
 
 MAX_SEQ_LEN = 100
 
-class TaobaoDataset(Dataset):
+class TaobaoSequenceDataset(Dataset):
 
     def __init__(
-        self, data_dir, min_ad_clicks, mode = "train", sequence_mode = False,
-        user_features = ["user", "gender", "age", "shopping", "occupation"],    # all features by default
-        ad_features = ["cate", "brand", "customer", "campaign", "adgroup"],     # all features by default
-        conditional_masking = False    # maps ad feature tuples to next feature subset in same order as provided
+        self, data_dir: str, 
+        is_train: bool = True,
+        min_timediff_unique: int = 30,       # The minimum number of seconds between identical interactions (user, adgroup, btag), or (user, cate, brand, btag), before they are considered duplicates
+        min_training_interactions: int = 5,  # The minimum number of non-ad-click, browse, ad-click, favorite, add-to-cart, or purchase interactions required in a training sequence
+        sequence_len: int = 100,
+        slide_window_every: int = 100,
+        user_features: list[str] = ["user", "gender", "age", "shopping", "occupation"],    # all features by default
+        ad_features: list[str] = ["adgroup", "cate", "brand", "customer", "campaign"],     # all features by default
+        force_reload: bool = False,
     ):
-        assert mode in ["pretrain", "finetune", "train", "test"], "mode must be pretrain, finetune, train, or test"
-        assert not (conditional_masking and sequence_mode), "Can only support one of conditional masking and sequence mode at a time"
-        assert "user" in user_features, f"Missing user id in user features: {user_features}"
-        assert "adgroup" in ad_features, f"Missing ad id in ad features: {ad_features}"
+        user_profile_parquet = os.path.join(data_dir, f"user_profile.parquet")
+        ad_feature_parquet = os.path.join(data_dir, f"ad_feature.parquet")
+        assert os.path.isfile(user_profile_parquet), f"Cannot find user_profile file {user_profile_parquet}. Please generate using data_process notebooks"
+        assert os.path.isfile(ad_feature_parquet), f"Cannot find ad_feature file {ad_feature_parquet}. Please generate using data_process notebooks"
 
-        user_profile_parquet = os.path.join(data_dir, f"user_profile_{min_ad_clicks}.parquet")
-        ad_feature_parquet = os.path.join(data_dir, f"ad_feature_{min_ad_clicks}.parquet")
-        train_parquet = os.path.join(data_dir, f"train_{min_ad_clicks}.parquet")
-        test_parquet = os.path.join(data_dir, f"test_{min_ad_clicks}.parquet")
+        self.is_train = is_train
+        self.user_feats = user_features
+        self.ad_feats = ad_features
+        self.selected_feats = [*user_features, *ad_features, "rel_ad_freq", "btag", "timestamp", "is_test", "seq_len"]
 
-        assert os.path.isfile(user_profile_parquet), f"Cannot find user_profile file {user_profile_parquet}. Please generate using data_preprocess_encode.ipynb"
-        assert os.path.isfile(ad_feature_parquet), f"Cannot find ad_feature file {ad_feature_parquet}. Please generate using data_preprocess_encode.ipynb"
-        assert os.path.isfile(train_parquet), f"Cannot find train data file {train_parquet}. Please generate using data_preprocess.ipynb"
-        assert os.path.isfile(test_parquet), f"Cannot find test data file {test_parquet}. Please generate using data_preprocess.ipynb"
+        sequence_params = f"timediff{min_timediff_unique}_mintrain{min_training_interactions}_seqlen{sequence_len}_slide{slide_window_every}"
+        if force_reload:
+            train_parquet = os.path.join(data_dir, "train.parquet")
+            test_parquet = os.path.join(data_dir, "test.parquet")
+            assert os.path.isfile(train_parquet), f"Cannot find train data file {train_parquet}. Please generate using data_process notebooks"
+            assert os.path.isfile(test_parquet), f"Cannot find test data file {test_parquet}. Please generate using data_process notebooks"
 
-        self.mode = mode
+            training_data = (pl.scan_parquet(train_parquet)
+                .filter(pl.col("timediff").is_null() | (pl.col("timediff") >= min_timediff_unique))
+                .filter(pl.len().over("user") >= min_training_interactions)
+                .collect()
+            )
+            validation_data = (pl.scan_parquet(test_parquet)
+                .filter(pl.col("user").is_in(training_data.select("user").unique()))
+                .collect()
+            )
+            interactions: pl.DataFrame = pl.concat([training_data, validation_data], how="vertical", rechunk=True)
+            del training_data, validation_data
+            
+            rel_ad_freqs = (interactions
+                .filter(pl.col("adgroup") > -1)
+                .select("adgroup", rel_ad_freq = (pl.len().over("adgroup") / pl.count("adgroup")).cast(pl.Float32))
+                .unique()
+            )
+            sequences = (interactions
+                .join(rel_ad_freqs, on="adgroup", how="left")
+                .with_columns(pl.col("rel_ad_freq").fill_null(0.0))
+                .group_by("user")
+                .agg(
+                    pl.col("gender", "age", "shopping", "occupation").first(),
+                    pl.col("adgroup", "cate", "brand", "customer", "campaign", "rel_ad_freq", "btag", "timestamp", "is_test").sort_by("timestamp"),
+                    seq_len = pl.col("btag").len().cast(pl.Int32)
+                )
+                .with_columns(pl.col("timestamp").list.diff().list.eval(pl.element().fill_null(0)))
+            )
+            del interactions, rel_ad_freqs
+
+            max_seq_len = sequences.select(pl.col("seq_len").max()).item()
+            train_sequences = (pl
+                .concat([
+                    (sequences
+                        .filter(pl.col("seq_len") > abs(end_idx))
+                        .select(
+                            pl.col("user", "gender", "age", "shopping", "occupation"),
+                            pl.col("adgroup", "cate", "brand", "customer", "campaign", "rel_ad_freq", "btag", "timestamp", "is_test")
+                                .list.gather(range(end_idx-sequence_len, end_idx), null_on_oob=True)
+                                .list.shift(pl.min_horizontal(pl.col("seq_len") + (end_idx-sequence_len), 0)),
+                            seq_len = pl.min_horizontal(pl.col("seq_len") + end_idx, sequence_len).cast(pl.Int32)
+                        )
+                    ) for end_idx in range(-1, -max_seq_len, -slide_window_every)
+                ], how="vertical")
+                .filter(pl.col("seq_len") >= min_training_interactions)
+                .with_columns(
+                    pl.col("adgroup", "cate", "brand", "customer", "campaign").list.eval(pl.element().fill_null(-1)).list.to_array(sequence_len),
+                    pl.col("rel_ad_freq").list.eval(pl.element().fill_null(0.0)).list.to_array(sequence_len),
+                    pl.col("btag").list.eval(pl.element().fill_null(-2)).list.to_array(sequence_len),
+                    pl.col("timestamp").list.eval(pl.element().fill_null(0)).list.to_array(sequence_len),
+                    pl.col("is_test").list.eval(pl.element().fill_null(True)).list.to_array(sequence_len),
+                )
+            )
+            train_sequences.write_parquet(os.path.join(data_dir, f"train_sequences_{sequence_params}.parquet"))
+            if is_train:
+                sequences = train_sequences.select(self.selected_feats).rechunk()
+                del train_sequences
+            
+            test_sequences = (sequences
+                .select(
+                    pl.col("user", "gender", "age", "shopping", "occupation"),
+                    pl.col("adgroup", "cate", "brand", "customer", "campaign", "rel_ad_freq", "btag", "timestamp", "is_test")
+                        .list.gather(range(-sequence_len, 0), null_on_oob=True)
+                        .list.shift(pl.min_horizontal(pl.col("seq_len") - sequence_len, 0)),
+                    seq_len = pl.min_horizontal(pl.col("seq_len"), sequence_len).cast(pl.Int32)
+                )
+                .with_columns(
+                    pl.col("adgroup", "cate", "brand", "customer", "campaign").list.eval(pl.element().fill_null(-1)).list.to_array(sequence_len),
+                    pl.col("rel_ad_freq").list.eval(pl.element().fill_null(0.0)).list.to_array(sequence_len),
+                    pl.col("btag").list.eval(pl.element().fill_null(-2)).list.to_array(sequence_len),
+                    pl.col("timestamp").list.eval(pl.element().fill_null(0)).list.to_array(sequence_len),
+                    pl.col("is_test").list.eval(pl.element().fill_null(True)).list.to_array(sequence_len),
+                )
+            )
+            test_sequences.write_parquet(os.path.join(data_dir, f"test_sequences_{sequence_params}.parquet"))
+            if not is_train:
+                sequences = test_sequences.select(self.selected_feats).rechunk()
+                del test_sequences
+
+        else:
+            train_seq_parquet = os.path.join(data_dir, f"train_sequences_{sequence_params}.parquet")
+            test_seq_parquet = os.path.join(data_dir, f"test_sequences_{sequence_params}.parquet")
+            assert os.path.isfile(train_seq_parquet), f"Cannot find train sequences file {train_seq_parquet}. Please generate by setting force_reload=True"
+            assert os.path.isfile(test_seq_parquet), f"Cannot find test sequences file {test_seq_parquet}. Please generate by setting force_reload=True"
+            if is_train:
+                sequences = (pl
+                    .scan_parquet(train_seq_parquet)
+                    .select(self.selected_feats)
+                    .collect()
+                    .rechunk()
+                )
+            else:
+                sequences = (pl
+                    .scan_parquet(test_seq_parquet)
+                    .select(self.selected_feats)
+                    .collect()
+                    .rechunk()
+                )
+
         self.interaction_mapping = {-1: "ad_non_click" ,0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
-        self.conditional_masking = conditional_masking
-        self.sequence_mode = sequence_mode
-        
-        train_data = pl.read_parquet(train_parquet)
-        test_data = pl.read_parquet(test_parquet)
 
-        self.user_feats = list(user_features)
-        self.user_profile = pl.read_parquet(user_profile_parquet).select(self.user_feats).unique()
-        self.user_encoder = OrdinalEncoder(dtype=np.uint32).fit(self.user_profile)
+        self.user_profile = pl.scan_parquet(user_profile_parquet).select(self.user_feats).unique().collect()
+        self.user_encoder = OrdinalEncoder(dtype=np.int32, encoded_missing_value=-1).fit(self.user_profile)
         self.user_encoder.set_output(transform="polars")
 
-        self.ad_feats = list(ad_features)
-        self.ad_feature = pl.read_parquet(ad_feature_parquet).select(self.ad_feats).unique()
+        self.ad_feature = pl.scan_parquet(ad_feature_parquet).select(self.ad_feats).unique().collect()
         self.ad_encoder = OrdinalEncoder(dtype=np.int32, encoded_missing_value=-1).fit(self.ad_feature)
         self.ad_encoder.set_output(transform="polars")
 
-        self.input_dims = [user.shape[0] for user in self.user_encoder.categories_]
-        self.output_dims = [category.shape[0] for category in self.ad_encoder.categories_]
-        
-        if self.conditional_masking:
-            polars_transformed_ad_feats: pl.DataFrame = self.ad_encoder.transform(self.ad_feature)
-            self.ad_features = polars_transformed_ad_feats.unique().to_numpy()
+        self.user_data = sequences.select(self.user_feats).to_numpy()
+        self.ads_data = [sequences[feat].to_numpy() for feat in self.ad_feats]
+        self.rel_ad_freqs = sequences["rel_ad_freqs"].to_numpy()
+        self.interaction_data = sequences["btag"].to_numpy()
+        self.timestamps = sequences["timestamp"].to_numpy()
+        self.padded_masks = sequences["is_test"].to_numpy()
+        self.seq_lens = sequences["seq_len"].to_numpy()
+        del sequences
 
-            self.conditional_mappings = []
-            for i in range(1, len(self.ad_feats)):
-                conditional_map = (
-                    polars_transformed_ad_feats
-                    .select(self.ad_feats[:i+1])
-                    .group_by(self.ad_feats[:i])
-                    .agg(
-                        pl.col(self.ad_feats[i]).unique()
-                    )
-                    .to_pandas()
-                )
-                conditional_map.index = list(zip(*[conditional_map[self.ad_feats[j]] for j in range(i)]))
-                self.conditional_mappings.append(conditional_map.to_dict()[self.ad_feats[i]])
 
-        if mode == "pretrain":
-            raw_data = train_data.filter(pl.col("adgroup").is_null())
-        elif mode == "finetune":
-            raw_data = train_data.drop_nulls("adgroup")
-        elif mode == "train":
-            raw_data = train_data
-        elif mode == "test":
-            raw_data = pl.concat([
-                train_data.drop_nulls("adgroup").with_columns(pl.lit(0).alias("is_test")),
-                test_data.with_columns(pl.lit(1).alias("is_test")),
-            ])
-
-        if sequence_mode:
-            user_features.remove("user")
-            if mode != "test":
-                sequences = (raw_data
-                    .select(pl.all(), (pl.len().over("adgroup") / len(raw_data)).cast(pl.Float32).alias("rel_ad_freq"))
-                    .sort("user", "timestamp")
-                    .with_columns(pl.when(pl.col("btag") == -1).then(0).otherwise(1).alias("btag_zeroed"))
-                    .group_by_dynamic(
-                        index_column=pl.int_range(pl.len()),
-                        every="10i",
-                        period=f"{MAX_SEQ_LEN}i",
-                        by="user"
-                    )
-                    .agg(
-                        pl.col(user_features).first(),
-                        pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp"),
-                        pl.sum("btag_zeroed").alias("click_cnt"),
-                        seq_len=pl.col("btag").len()
-                    )
-                    .filter(pl.col("click_cnt") >= min_ad_clicks-1)
-                    .drop(["click_cnt", "literal"])
-                )
-
-            else:
-                sorted_data = (raw_data
-                    .select(pl.all(), (pl.len().over("adgroup") / len(raw_data)).cast(pl.Float32).alias("rel_ad_freq"))
-                    .sort(["user", "is_test", "timestamp"], descending=[False, True, True])
-                    .with_columns(
-                        (pl.col("timestamp").cum_count().over("user")-1).alias("row_num")
-                    )
-                    .with_columns((pl.col("row_num") // MAX_SEQ_LEN).alias("chunk_id"))
-                    .filter(pl.col("chunk_id") == 0)
-                    .sort("user", "timestamp", "is_test")
-                )
-
-                sequences = (sorted_data
-                    .group_by(["user", "chunk_id"],  maintain_order=True)
-                    .agg(
-                        pl.col(user_features).first(), 
-                        pl.col(*self.ad_feats, "rel_ad_freq", "btag", "timestamp"), 
-                        seq_len=pl.col("btag").len()
-                        )
-                    .drop("chunk_id")
-                )
-
-            max_seq_len = sequences.select(pl.col("seq_len").max()).item()
-            self.sequence_data = (sequences
-                .with_columns(pad_len=max_seq_len-pl.col("seq_len"))
-                .select(
-                    pl.col(self.user_feats),
-                    *(pl.col(feat).list.concat(
-                        pl.lit(0, dtype=pl.UInt32).repeat_by(pl.col("pad_len"))
-                    ).list.to_array(max_seq_len) for feat in [*self.ad_feats, "rel_ad_freq", "btag", "timestamp"]),
-                    padded_mask = pl.lit(False).repeat_by(pl.col("seq_len")).list.concat(
-                        pl.lit(True).repeat_by(pl.col("pad_len"))
-                    ).list.to_array(max_seq_len)
-                )
-            )
-            self.user_data = self.sequence_data.select(self.user_feats).to_numpy().squeeze()
-            self.ads_data = [self.sequence_data.select(feat).to_series().to_numpy() for feat in (*self.ad_feats, "rel_ad_freq")]
-            self.interaction_data = self.sequence_data.select("btag").to_series().to_numpy()
-            self.timestamps = self.sequence_data.select("timestamp").to_series().to_numpy()
-            self.padded_masks = self.sequence_data.select("padded_mask").to_series().to_numpy()
-
-        else:
-            self.user_data = raw_data.select(self.user_feats).to_numpy().squeeze()
-            self.ads_data = raw_data.select(self.ad_feats).to_numpy().squeeze()
-            self.interaction_data = raw_data.select("btag").to_series().to_numpy()
-            self.timestamps = raw_data.select("timestamp").to_series().to_numpy()
-        
-        del raw_data
-        del train_data
-        del test_data
-    
     @cached_property
     def n_users(self):
         return len(self.user_profile["user"].unique())
 
     @cached_property
     def n_ads(self):
-        return len(self.ad_feature["adgroup"].unique())
+        # adgroups have nulls encoded as -1s
+        return len(self.ad_feature["adgroup"].unique())-1
     
     @cached_property
     def n_brands(self):
-        return len(self.ad_feature["brand"].unique())
+        # brands have nulls encoded as -1s
+        return len(self.ad_feature["brand"].unique())-1
 
     @cached_property
     def n_cates(self):
         return len(self.ad_feature["cate"].unique())
     
     def get_index(self):
-        transformed_ad_feats = self.ad_encoder.transform(self.ad_feature).sort("adgroup")
+        transformed_ad_feats: pl.DataFrame = self.ad_encoder.transform(self.ad_feature).sort("adgroup")
         batch = []
         for feat_name in self.ad_feats:
             batch.append(torch.tensor(transformed_ad_feats[feat_name].to_numpy()))
@@ -201,24 +206,14 @@ class TaobaoDataset(Dataset):
         return AdBatch(*batch)
     
     def __len__(self):
-        return len(self.timestamps)
+        return len(self.seq_lens)
     
     def __getitem__(self, idx):
-        if self.sequence_mode:
-            max_batch_len = (~self.padded_masks[idx]).sum(axis=1).max()
-            return TaobaoInteractionsSeqBatch(
-                UserBatch(self.user_data[idx].astype(np.int32)),
-                AdBatch(*([ads_feat[idx, :max_batch_len] for ads_feat in self.ads_data])),
-                self.interaction_data[idx, :max_batch_len],
-                self.timestamps[idx, :max_batch_len].astype(np.int32),
-                self.padded_masks[idx, :max_batch_len]
-            )
-        else:
-            user_data, ads_data, timestamps, interactions = self.user_data[idx], self.ads_data[idx], self.timestamps[idx], self.interaction_data[idx]
-            ads_masks = []
-            for i, dim in enumerate(self.output_dims[1:]):
-                mask_indices = self.conditional_mappings[i][tuple(ads_data[:i+1].tolist())]
-                mask = np.ones(dim, dtype=bool)
-                mask[mask_indices] = False
-                ads_masks.append(mask)
-            return user_data, ads_data, ads_masks, timestamps, interactions
+        max_batch_len = self.seq_lens[idx].max()
+        return TaobaoInteractionsSeqBatch(
+            UserBatch(self.user_data[idx]),
+            AdBatch(*([ads_feat[idx, :max_batch_len] for ads_feat in self.ads_data]), self.rel_ad_freqs[idx]),
+            self.interaction_data[idx, :max_batch_len],
+            self.timestamps[idx, :max_batch_len],
+            self.padded_masks[idx, :max_batch_len]
+        )
