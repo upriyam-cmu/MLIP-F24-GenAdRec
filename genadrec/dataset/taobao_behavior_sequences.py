@@ -38,9 +38,8 @@ class TaobaoSequenceDataset(Dataset):
         min_training_interactions: int = 5,  # The minimum number of non-ad-click, browse, ad-click, favorite, add-to-cart, or purchase interactions required in a training sequence
         sequence_len: int = 100,
         slide_window_every: int = 100,
-        # user_features: list[str] = ["user", "gender", "age", "shopping", "occupation"],    # all features by default
-        # ad_features: list[str] = ["adgroup", "cate", "brand", "customer", "campaign"],     # all features by default
-        force_reload: bool = False,
+        user_features: list[str] = ["user", "gender", "age", "shopping", "occupation"],    # all features by default
+        ad_features: list[str] = ["adgroup", "cate", "brand", "customer", "campaign"],     # all features by default
     ):
         user_profile_parquet = os.path.join(data_dir, f"user_profile.parquet")
         ad_feature_parquet = os.path.join(data_dir, f"ad_feature.parquet")
@@ -48,10 +47,9 @@ class TaobaoSequenceDataset(Dataset):
         assert os.path.isfile(ad_feature_parquet), f"Cannot find ad_feature file {ad_feature_parquet}. Please generate using data_process notebooks"
 
         self.is_train = is_train
-        self.user_feats = ["user", "gender", "age", "shopping", "occupation"]
-        self.ad_feats = ["adgroup", "cate", "brand", "customer", "campaign"]
-        self.full_ad_feats = self.ad_feats + ["rel_ad_freq", "btag", "timestamp", "is_test"]
-        self.selected_feats = [*self.user_feats, *self.full_ad_feats, "seq_len"]
+        self.user_feats = user_features
+        self.ad_feats = ad_features
+        self.missing_ad_feats = set(["adgroup", "cate", "brand", "customer", "campaign"]).difference(self.ad_feats)
         
         self.interaction_mapping = {-1: "ad_non_click" ,0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
 
@@ -70,13 +68,15 @@ class TaobaoSequenceDataset(Dataset):
         assert os.path.isfile(train_file), f"Cannot find training data {train_file}. Please generate with data_process notebooks"
         assert os.path.isfile(test_file), f"Cannot find test data {test_file}. Please generate with data_process notebooks"
         
-        if is_train:
+        if self.is_train:
             data = np.load(train_file)
         else:
             data = np.load(test_file)
 
-        self.user_data = data["user_data"]
-        self.ads_data = [data[feat] for feat in self.ad_feats]
+        user_feat_map = {"user": 0, "gender": 1, "age": 2, "shopping": 3, "occupation": 4}
+        user_feat_indices = [user_feat_map[feat] for feat in self.user_feats]
+        self.user_data = data["user_data"][:, user_feat_indices]
+        self.ads_data = {feat: data[feat] for feat in self.ad_feats}
         self.rel_ad_freqs = data["rel_ad_freqs"]
         self.interaction_data = data["interaction_data"]
         self.timestamps = data["timestamps"]
@@ -91,13 +91,11 @@ class TaobaoSequenceDataset(Dataset):
 
     @cached_property
     def n_ads(self):
-        # adgroups have nulls encoded as -1s
-        return len(self.ad_feature["adgroup"].unique())-1
+        return len(self.ad_feature["adgroup"].unique())
 
     @cached_property
     def n_brands(self):
-        # brands have nulls encoded as -1s
-        return len(self.ad_feature["brand"].unique())-1
+        return len(self.ad_feature["brand"].unique())
 
     @cached_property
     def n_cates(self):
@@ -118,7 +116,9 @@ class TaobaoSequenceDataset(Dataset):
         max_batch_len = self.seq_lens[idx].max()
         return TaobaoInteractionsSeqBatch(
             UserBatch(self.user_data[idx]),
-            AdBatch(*([ads_feat[idx, :max_batch_len] for ads_feat in self.ads_data]), self.rel_ad_freqs[idx, :max_batch_len]),
+            AdBatch(**{feat+"_id": self.ads_data[feat][idx, :max_batch_len] for feat in self.ad_feats},
+                    **{feat+"_id": None for feat in self.missing_ad_feats},
+                    rel_ad_freqs=self.rel_ad_freqs[idx, :max_batch_len]),
             self.interaction_data[idx, :max_batch_len],
             self.timestamps[idx, :max_batch_len],
             self.padded_masks[idx, :max_batch_len]
