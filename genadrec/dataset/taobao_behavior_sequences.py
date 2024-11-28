@@ -212,7 +212,7 @@ class TaobaoSequenceDataset(Dataset):
         max_batch_len = self.seq_lens[idx].max()
         return TaobaoInteractionsSeqBatch(
             UserBatch(self.user_data[idx]),
-            AdBatch(*([ads_feat[idx, :max_batch_len] for ads_feat in self.ads_data]), self.rel_ad_freqs[idx]),
+            AdBatch(*([ads_feat[idx, :max_batch_len] for ads_feat in self.ads_data]), self.rel_ad_freqs[idx, :max_batch_len]),
             self.interaction_data[idx, :max_batch_len],
             self.timestamps[idx, :max_batch_len],
             self.padded_masks[idx, :max_batch_len]
