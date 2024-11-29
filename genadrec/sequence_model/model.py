@@ -89,7 +89,7 @@ class RNNSeqModel(nn.Module):
         seq_lengths = (~batch.is_padding).sum(axis=1)
         
         self.rnn.reset()
-        model_output = self.rnn(input_emb, user_emb.swapaxes(0,1).repeat(2,1,1))[:, :-1, :]
+        model_output = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2,1,1))[:, :-1, :]
 
         pos_ids = batch.ad_feats.adgroup_id[:, 1:][shifted_is_click].unsqueeze(1)
         neg_ids = torch.flatten(batch.ad_feats.adgroup_id)
@@ -125,12 +125,12 @@ class RNNSeqModel(nn.Module):
     def eval_forward(self, batch: TaobaoInteractionsSeqBatch):
         user_emb = self.user_embedding(batch.user_feats)
         ad_emb = self.ad_embedding(batch.ad_feats)
-        action = batch.is_click + 1
+        action = batch.is_click + 2
         action_emb = self.action_embedding(action.to(self.device))
         
         input_emb = ad_emb + action_emb
         self.rnn.reset()
-        output_emb = self.rnn(input_emb, user_emb.swapaxes(0,1).repeat(2,1,1))
+        output_emb = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2,1,1))
 
         B, L, D = ad_emb.shape
         

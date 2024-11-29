@@ -45,6 +45,7 @@ class Trainer:
                  embedder_hidden_dims: Optional[List[int]] = [1024, 512, 128],
                  seq_rnn_cell_type: str = "GRU",
                  seq_rnn_num_layers: int = 2,
+                 use_user_feats: bool = True,
                  force_dataset_reload: bool = False,
                  checkpoint_path: Optional[str] = None,
                  save_dir_root: str = "out/"
@@ -61,6 +62,7 @@ class Trainer:
         self.embedder_hidden_dims = embedder_hidden_dims
         self.seq_rnn_cell_type = seq_rnn_cell_type
         self.seq_rnn_num_layers = seq_rnn_num_layers
+        self.use_user_feats = use_user_feats
         self.force_dataset_reload = force_dataset_reload
         self.checkpoint_path = checkpoint_path
         self.save_dir_root = save_dir_root
@@ -127,12 +129,18 @@ class Trainer:
             sampler = BatchSampler(RandomSampler(self.eval_dataset), self.eval_batch_size, False)
             self.eval_dataloader = DataLoader(self.eval_dataset, sampler=sampler, batch_size=None)
 
+            if self.use_user_feats:
+                user_categorical_feats = [
+                    CategoricalFeature(feat, self.train_dataset.user_encoder.feat_num_unique_with_null[feat]) for feat in self.train_dataset.user_feats
+                    if feat != "user"
+                ]
+            else:
+                user_categorical_feats = [CategoricalFeature("user", self.train_dataset.user_encoder.feat_num_unique_with_null["user"])]
+
             self.model = RNNSeqModel(
                 n_users=self.train_dataset.n_users,
                 n_actions=self.train_dataset.n_actions,
-                user_categorical_feats=[
-                    CategoricalFeature(feat, self.train_dataset.user_encoder.feat_num_unique_with_null[feat]) for feat in self.train_dataset.user_feats
-                ],
+                user_categorical_feats=user_categorical_feats,
                 ad_categorical_feats=[
                     #CategoricalFeature("adgroup_id", self.train_dataset.n_ads),
                     CategoricalFeature("brand_id", self.train_dataset.n_brands),
