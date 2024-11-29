@@ -22,7 +22,7 @@ print("Using device:", device)
 
 # %%
 parser = argparse.ArgumentParser()
-parser.add_argument("--run_label", type=str, default="")
+parser.add_argument("--run_label", type=str)
 parser.add_argument("--eval_model_id", type=str)
 parser.add_argument("--conditional", action="store_true")
 parser.add_argument("--residual", action="store_true")
@@ -38,12 +38,6 @@ user_feats = args.user_feats
 augmented = args.augmented
 
 assert user_feats != augmented, "specify training with user feats xor behavior log augmented data only"
-
-if run_label == "":
-    run_label = '-'.join([
-        'user_fts' if user_feats else 'uid_only',
-        'bhvr_aug' if augmented else '',
-    ])
 
 # %%
 batch_size = 1024

@@ -12,6 +12,6 @@ saved_models
 __pycache__
 outputs
 .vscode
-out
+out*
 log.txt
 *.log

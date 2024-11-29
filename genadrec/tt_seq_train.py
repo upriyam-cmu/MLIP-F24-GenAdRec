@@ -303,9 +303,9 @@ def accumulate_metrics(query, target, index, ks, metrics=None):
             metrics[f"hr@{k}"] = hits
 
     if "ndcg" in metrics:
-        metrics["ndcg"] += ndcg_score
+        metrics["ndcg"] += ndcg_score.sum().item()
     else:
-        metrics["ndcg"] = ndcg_score
+        metrics["ndcg"] = ndcg_score.sum().item()
 
     return metrics
 
@@ -316,9 +316,13 @@ if __name__ == "__main__":
         learning_rate=0.001, # 0.0005 for two_tower
         eval_batch_size=1024,
         train_batch_size=32,
-        embedding_dim=32,
+        embedding_dim=64,
+        embedder_hidden_dims=[64],
         force_dataset_reload=False,
-        checkpoint_path="out/checkpoint_15.pt"
+        save_model_every_n=1,
+        train_eval_every_n=1,
+        # checkpoint_path="out/checkpoint_15.pt"
     )
-    trainer.eval()
-    # trainer.train()
+    print("Model size:", sum(param.size() for param in trainer.model.parameters()))
+    # trainer.eval()
+    trainer.train()

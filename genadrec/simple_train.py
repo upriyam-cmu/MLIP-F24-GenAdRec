@@ -22,7 +22,7 @@ print("Using device:", device)
 
 # %%
 parser = argparse.ArgumentParser()
-parser.add_argument("--run_label", type=str, default="")
+parser.add_argument("--run_label", type=str)
 parser.add_argument("--conditional", action="store_true")
 parser.add_argument("--residual", action="store_true")
 parser.add_argument("--user_feats", action="store_true")
@@ -37,15 +37,9 @@ augmented = args.augmented
 
 assert user_feats != augmented, "specify training with user feats xor behavior log augmented data only"
 
-if run_label == "":
-    run_label = '-'.join([
-        'user_fts' if user_feats else 'uid_only',
-        'bhvr_aug' if augmented else '',
-    ])
-
 # %%
 batch_size = 1024
-learning_rate = 0.0005
+learning_rate = 0.0001
 train_epochs = 30
 eval_every_n = 1
 save_every_n = 1
@@ -56,7 +50,7 @@ outputs_dir = os.path.join("outputs", run_label)
 dataset_params = {
     "data_dir": "data",
     "augmented": augmented,
-    "user_features": ["user", "gender", "age", "shopping", "occupation"] if user_feats else ["user"],
+    "user_features": ["gender", "age", "shopping", "occupation"] if user_feats else ["user"],
     "ad_features": ["cate", "brand", "customer", "campaign"],
 }
 

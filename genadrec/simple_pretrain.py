@@ -45,7 +45,7 @@ outputs_dir = os.path.join("outputs", run_label)
 dataset_params = {
     "data_dir": "data",
     "augmented": True,
-    "user_features": ["user", "gender", "age", "shopping", "occupation"] if user_feats else ["user"],
+    "user_features": ["gender", "age", "shopping", "occupation"] if user_feats else ["user"],
     "ad_features": ["cate", "brand", "customer", "campaign"],
 }
 
