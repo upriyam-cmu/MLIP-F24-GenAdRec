@@ -3,7 +3,7 @@ import numpy as np
 import polars as pl
 import torch
 from functools import cached_property
-from sklearn.preprocessing import OrdinalEncoder
+from encoder.polars_ordinal_encoder import PolarsOrdinalEncoder
 from torch.utils.data.dataset import Dataset
 from typing import NamedTuple
 
@@ -34,10 +34,11 @@ class TaobaoSequenceDataset(Dataset):
     def __init__(
         self, data_dir: str,
         is_train: bool = True,
-        min_timediff_unique: int = 30,       # The minimum number of seconds between identical interactions (user, adgroup, btag), or (user, cate, brand, btag), before they are considered duplicates
-        min_training_interactions: int = 5,  # The minimum number of non-ad-click, browse, ad-click, favorite, add-to-cart, or purchase interactions required in a training sequence
-        sequence_len: int = 100,
-        slide_window_every: int = 100,
+        min_timediff_unique: int = 30,      # The minimum number of seconds between identical interactions (user, adgroup, btag), or (user, cate, brand, btag), before they are considered duplicates
+        min_training_interactions: int = 5, # The minimum number of non-ad-click, browse, ad-click, favorite, add-to-cart, or purchase interactions required in a training sequence
+        augmented: bool = False,            # Whether to include behavior log interaction data or not
+        sequence_len: int = 128,
+        slide_window_every: int = 64,
         user_features: list[str] = ["user", "gender", "age", "shopping", "occupation"],    # all features by default
         ad_features: list[str] = ["adgroup", "cate", "brand", "customer", "campaign"],     # all features by default
     ):
@@ -53,18 +54,17 @@ class TaobaoSequenceDataset(Dataset):
         
         self.interaction_mapping = {-1: "ad_non_click" ,0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
 
-        self.user_profile = pl.scan_parquet(user_profile_parquet).select(self.user_feats).unique().collect()
-        self.user_encoder = OrdinalEncoder(dtype=np.int32, encoded_missing_value=-1).fit(self.user_profile)
-        self.user_encoder.set_output(transform="polars")
+        self.user_profile = pl.read_parquet(user_profile_parquet)
+        self.user_encoder = PolarsOrdinalEncoder(fit_data = self.user_profile)
 
-        self.ad_feature = pl.scan_parquet(ad_feature_parquet).select(self.ad_feats).unique().collect()
-        self.ad_encoder = OrdinalEncoder(dtype=np.int32, encoded_missing_value=-1).fit(self.ad_feature)
-        self.ad_encoder.set_output(transform="polars")
+        self.ad_feature = pl.read_parquet(ad_feature_parquet)
+        self.ad_encoder = PolarsOrdinalEncoder(fit_data = self.ad_feature)
 
-        sequence_params = f"timediff{min_timediff_unique}_mintrain{min_training_interactions}_seqlen{sequence_len}_slide{slide_window_every}"
-        
-        train_file = os.path.join(data_dir, f"train_data_{sequence_params}.npz")
-        test_file = os.path.join(data_dir, f"test_data_{sequence_params}.npz")
+        train_sequence_params = f"timediff{min_timediff_unique}_mintrain{min_training_interactions}_seqlen{sequence_len}_slide{slide_window_every}" + ("_aug" if augmented else "")
+        test_sequence_params = f"timediff{min_timediff_unique}_mintrain{min_training_interactions}_seqlen{sequence_len}" + ("_aug" if augmented else "")
+
+        train_file = os.path.join(data_dir, f"train_data_{train_sequence_params}.npz")
+        test_file = os.path.join(data_dir, f"test_data_{test_sequence_params}.npz")
         assert os.path.isfile(train_file), f"Cannot find training data {train_file}. Please generate with data_process notebooks"
         assert os.path.isfile(test_file), f"Cannot find test data {test_file}. Please generate with data_process notebooks"
         
@@ -103,11 +103,9 @@ class TaobaoSequenceDataset(Dataset):
 
     def get_index(self):
         transformed_ad_feats: pl.DataFrame = self.ad_encoder.transform(self.ad_feature).sort("adgroup")
-        batch = []
-        for feat_name in self.ad_feats:
-            batch.append(torch.tensor(transformed_ad_feats[feat_name].to_numpy()))
-        batch.append(None)
-        return AdBatch(*batch)
+        return AdBatch(**{feat+"_id": torch.tensor(transformed_ad_feats[feat].to_numpy()) for feat in self.ad_feats},
+                       **{feat+"_id": None for feat in self.missing_ad_feats},
+                       rel_ad_freqs=None)
 
     def __len__(self):
         return len(self.seq_lens)
