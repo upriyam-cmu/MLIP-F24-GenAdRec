@@ -102,7 +102,7 @@ class TaobaoSequenceDataset(Dataset):
         return len(self.ad_feature["cate"].unique())
 
     def get_index(self):
-        transformed_ad_feats: pl.DataFrame = self.ad_encoder.transform(self.ad_feature).sort("adgroup")
+        transformed_ad_feats = self.ad_encoder.transform(self.ad_feature.filter(pl.col("adgroup") > -1)).sort("adgroup")
         return AdBatch(**{feat+"_id": torch.tensor(transformed_ad_feats[feat].to_numpy()) for feat in self.ad_feats},
                        **{feat+"_id": None for feat in self.missing_ad_feats},
                        rel_ad_freqs=None)

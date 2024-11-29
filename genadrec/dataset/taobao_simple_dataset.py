@@ -10,7 +10,7 @@ class TaobaoDataset(Dataset):
         self, data_dir,
         mode = "train",
         min_timediff_unique: int = 30,      # The minimum number of seconds between identical interactions (user, adgroup, btag), or (user, cate, brand, btag), before they are considered duplicates
-        min_training_interactions: int = 5, # The minimum number of non-ad-click, browse, ad-click, favorite, add-to-cart, or purchase interactions required in a training sequence
+        min_training_interactions: int = 1, # The minimum number of non-ad-click, browse, ad-click, favorite, add-to-cart, or purchase interactions required in a training sequence
         augmented: bool = False,            # Whether to include behavior log interaction data or not
         user_features = ["user", "gender", "age", "shopping", "occupation"],    # all features by default
         ad_features = ["cate", "brand", "customer", "campaign", "adgroup"],     # all features by default
@@ -74,14 +74,14 @@ class TaobaoDataset(Dataset):
             data = np.load(test_file)
         
         self.interaction_data = data["interaction_data"]
-        train_idxs = np.full_like(self.interaction_data, True)
+        train_idxs = np.full_like(self.interaction_data, True, dtype=bool)
         if mode == "pretrain":
             train_idxs = (self.interaction_data != 1)
         elif mode == "finetune":
             train_idxs = (self.interaction_data == 1)
 
-        self.user_data = data["user_data"][train_idxs, user_feat_indices]
-        self.ads_data = data["ads_data"][train_idxs, ad_feat_indices]
+        self.user_data = data["user_data"][train_idxs][:, user_feat_indices]
+        self.ads_data = data["ads_data"][train_idxs][:, ad_feat_indices]
         self.timestamps = data["timestamps"][train_idxs]
         self.interaction_data = data["interaction_data"][train_idxs]
         del data
