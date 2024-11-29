@@ -167,9 +167,22 @@ class Trainer:
         if model is None and self.model_type == ModelType.TWO_TOWER:
             model = TwoTowerModel(ads_categorical_features=self.train_dataset.categorical_features, ads_hidden_dims=self.embedder_hidden_dims, n_users=self.train_dataset.n_users, embedding_dim=self.embedding_dim, use_user_ids=True, device=self.device)
         if model is None and self.model_type == ModelType.SEQ:
+            if self.use_user_feats:
+                user_categorical_feats = [
+                    CategoricalFeature(feat, self.train_dataset.user_encoder.feat_num_unique_with_null[feat]) for feat in self.train_dataset.user_feats
+                    if feat != "user"
+                ]
+            else:
+                user_categorical_feats = [CategoricalFeature("user", self.train_dataset.user_encoder.feat_num_unique_with_null["user"])]
             self.model = RNNSeqModel(
                 n_users=self.train_dataset.n_users,
-                ad_categorical_feats=[CategoricalFeature("adgroup_id", self.train_dataset.n_ads)],
+                n_actions=self.train_dataset.n_actions,
+                user_categorical_feats=user_categorical_feats,
+                ad_categorical_feats=[
+                    #CategoricalFeature("adgroup_id", self.train_dataset.n_ads),
+                    CategoricalFeature("brand_id", self.train_dataset.n_brands),
+                    CategoricalFeature("cate_id", self.train_dataset.n_cates),
+                ],
                 cell_type=self.seq_rnn_cell_type,
                 rnn_input_size=self.embedding_dim,
                 rnn_hidden_size=self.embedding_dim,
@@ -277,6 +290,10 @@ def accumulate_metrics(query, target, index, ks, metrics=None):
     q_i_sim = torch.einsum("ij,kj->ik", query, index)
     rank = (q_t_sim.unsqueeze(1) <= q_i_sim).sum(axis=1)
     
+    # compute and return ndcg
+    ndcg_score = np.log(2) / torch.log(rank + 1)  # for single target, ndcg expression can be simplified
+    ndcg_score = torch.clip(ndcg_score, 0.0, 1.0)  # clip just in case
+    
     metrics = {} if metrics is None else metrics
     for k in ks:
         hits = (rank <= k).sum().item()
@@ -284,6 +301,11 @@ def accumulate_metrics(query, target, index, ks, metrics=None):
             metrics[f"hr@{k}"] += hits
         else:
             metrics[f"hr@{k}"] = hits
+
+    if "ndcg" in metrics:
+        metrics["ndcg"] += ndcg_score
+    else:
+        metrics["ndcg"] = ndcg_score
 
     return metrics
 
@@ -295,6 +317,8 @@ if __name__ == "__main__":
         eval_batch_size=1024,
         train_batch_size=32,
         embedding_dim=32,
-        force_dataset_reload=False
+        force_dataset_reload=False,
+        checkpoint_path="out/checkpoint_15.pt"
     )
-    trainer.train()
+    trainer.eval()
+    # trainer.train()

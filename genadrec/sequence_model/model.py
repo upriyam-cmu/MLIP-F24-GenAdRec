@@ -59,6 +59,7 @@ class RNNSeqModel(nn.Module):
         return chain(
             self.action_embedding.parameters(),
             self.ad_embedding.mlp.parameters(),
+            self.user_embedding.mlp.parameters(),
             self.rnn.parameters()
         )
 
@@ -75,18 +76,8 @@ class RNNSeqModel(nn.Module):
         B, L, D = ad_emb.shape
 
         input_emb = ad_emb + action_emb
-        #mask = (
-        #    (~batch.is_padding).unsqueeze(1) &
-        #    (batch.timestamp.unsqueeze(2) >= batch.timestamp.unsqueeze(1)) &
-        #    (batch.ad_feats.adgroup_id.unsqueeze(2) != batch.ad_feats.adgroup_id.unsqueeze(1)) & 
-        #    (batch.is_click == -1).unsqueeze(1)
-        #)[:, 1:, :].to(self.device)
-        #pos_neg_mask_expanded = torch.zeros_like(mask).unsqueeze(3).repeat(1, 1, 1, B)
-        #indices = torch.arange(B, dtype=torch.int32, device=self.device)
-        #pos_neg_mask_expanded[indices, :, :, indices] = mask
 
         shifted_is_click = is_click[:, 1:]
-        seq_lengths = (~batch.is_padding).sum(axis=1)
         
         self.rnn.reset()
         model_output = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2,1,1))[:, :-1, :]
@@ -94,12 +85,6 @@ class RNNSeqModel(nn.Module):
         pos_ids = batch.ad_feats.adgroup_id[:, 1:][shifted_is_click].unsqueeze(1)
         neg_ids = torch.flatten(batch.ad_feats.adgroup_id)
         
-        # user_expanded = batch.user_feats.user.unsqueeze(1).repeat(1,L)
-        # pos_users = user_expanded[:,1:][shifted_is_click].unsqueeze(1)
-        # neg_users = torch.flatten(user_expanded)
-
-        
-        #pos_neg_mask = torch.flatten(pos_neg_mask_expanded[shifted_is_click], start_dim=1, end_dim=2)
         pos_neg_mask = (
             (pos_ids != neg_ids) & ((~batch.is_padding).flatten())
         ).to(self.device)
