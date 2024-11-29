@@ -15,6 +15,7 @@ class RNNSeqModel(nn.Module):
     def __init__(self,
                  n_users: int,
                  n_actions: int,
+                 user_categorical_feats: List[CategoricalFeature],
                  ad_categorical_feats: List[CategoricalFeature],
                  cell_type: str,
                  rnn_input_size,
@@ -36,8 +37,8 @@ class RNNSeqModel(nn.Module):
             device=device
         )
 
-        self.user_embedding = UserIdTower(
-            n_users=n_users,
+        self.user_embedding = AdTower(
+            categorical_features=user_categorical_feats,
             embedding_dim=rnn_hidden_size,
             hidden_dims=embedder_hidden_dims,
             device=device
@@ -62,7 +63,7 @@ class RNNSeqModel(nn.Module):
         )
 
     def sparse_grad_parameters(self):
-        return chain(self.ad_embedding.ad_embedder.parameters(), self.user_embedding.id_embedding.parameters())
+        return chain(self.ad_embedding.ad_embedder.parameters(), self.user_embedding.ad_embedder.parameters())
 
     def forward(self, batch: TaobaoInteractionsSeqBatch):
         user_emb = self.user_embedding(batch.user_feats)
@@ -129,7 +130,7 @@ class RNNSeqModel(nn.Module):
         
         input_emb = ad_emb + action_emb
         self.rnn.reset()
-        output_emb = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2,1,1))
+        output_emb = self.rnn(input_emb, user_emb.swapaxes(0,1).repeat(2,1,1))
 
         B, L, D = ad_emb.shape
         

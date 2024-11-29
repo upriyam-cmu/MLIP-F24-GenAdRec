@@ -109,7 +109,7 @@ class Trainer:
                 data_dir="data",
                 is_train=True,
                 augmented=False,
-                user_features=["user"],  # ["user", "gender", "age", "shopping", "occupation"],
+                user_features=["user", "gender", "age", "shopping", "occupation"],
                 ad_features=["adgroup", "cate", "brand"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
             )
 
@@ -120,7 +120,7 @@ class Trainer:
                 data_dir="data",
                 is_train=False,
                 augmented=False,
-                user_features=["user"],  # ["user", "gender", "age", "shopping", "occupation"],
+                user_features=["user", "gender", "age", "shopping", "occupation"],
                 ad_features=["adgroup", "cate", "brand"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
             )
 
@@ -130,6 +130,9 @@ class Trainer:
             self.model = RNNSeqModel(
                 n_users=self.train_dataset.n_users,
                 n_actions=self.train_dataset.n_actions,
+                user_categorical_feats=[
+                    CategoricalFeature(feat, self.train_dataset.user_encoder.feat_num_unique_with_null[feat]) for feat in self.train_dataset.user_feats
+                ],
                 ad_categorical_feats=[
                     #CategoricalFeature("adgroup_id", self.train_dataset.n_ads),
                     CategoricalFeature("brand_id", self.train_dataset.n_brands),

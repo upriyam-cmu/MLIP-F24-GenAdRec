@@ -19,6 +19,10 @@ class AdBatch(NamedTuple):
 
 class UserBatch(NamedTuple):
     user: np.array
+    gender: np.array
+    age: np.array
+    shopping: np.array
+    occupation: np.array
 
 
 class TaobaoInteractionsSeqBatch(NamedTuple):
@@ -51,6 +55,7 @@ class TaobaoSequenceDataset(Dataset):
         self.user_feats = user_features
         self.ad_feats = ad_features
         self.missing_ad_feats = set(["adgroup", "cate", "brand", "customer", "campaign"]).difference(self.ad_feats)
+        self.missing_user_feats = set(["user", "gender", "age", "shopping", "occupation"]).difference(self.user_feats)
         
         self.interaction_mapping = {-1: "ad_non_click" ,0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
 
@@ -74,8 +79,9 @@ class TaobaoSequenceDataset(Dataset):
             data = np.load(test_file)
 
         user_feat_map = {"user": 0, "gender": 1, "age": 2, "shopping": 3, "occupation": 4}
-        user_feat_indices = [user_feat_map[feat] for feat in self.user_feats]
-        self.user_data = data["user_data"][:, user_feat_indices]
+        # user_feat_indices = [user_feat_map[feat] for feat in self.user_feats]
+        # self.user_data = data["user_data"][:, user_feat_indices]
+        self.user_data = {feat: data["user_data"][:, user_feat_map[feat]] for feat in self.user_feats}
         self.ads_data = {feat: data[feat] for feat in self.ad_feats}
         self.rel_ad_freqs = data["rel_ad_freqs"]
         self.interaction_data = data["interaction_data"]
@@ -117,7 +123,8 @@ class TaobaoSequenceDataset(Dataset):
     def __getitem__(self, idx):
         max_batch_len = self.seq_lens[idx].max()
         return TaobaoInteractionsSeqBatch(
-            UserBatch(self.user_data[idx]),
+            UserBatch(**{feat: self.user_data[feat][idx] for feat in self.user_feats},
+                      **{feat: None for feat in self.missing_user_feats}),
             AdBatch(**{feat+"_id": self.ads_data[feat][idx, :max_batch_len] for feat in self.ad_feats},
                     **{feat+"_id": None for feat in self.missing_ad_feats},
                     rel_ad_freqs=self.rel_ad_freqs[idx, :max_batch_len]),
