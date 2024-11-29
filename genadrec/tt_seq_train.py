@@ -163,7 +163,7 @@ class Trainer:
                         model: Module = None,
                         optimizer: Module = None,
                         sparse_optimizer: Module = None) -> LoadedCheckpoint:
-        state = torch.load(path)
+        state = torch.load(path, map_location=self.device)
         if model is None and self.model_type == ModelType.TWO_TOWER:
             model = TwoTowerModel(ads_categorical_features=self.train_dataset.categorical_features, ads_hidden_dims=self.embedder_hidden_dims, n_users=self.train_dataset.n_users, embedding_dim=self.embedding_dim, use_user_ids=True, device=self.device)
         if model is None and self.model_type == ModelType.SEQ:
@@ -192,13 +192,13 @@ class Trainer:
                 rnn_batch_first=True
             )
         
-        model.load_state_dict(state["model"])
+        self.model.load_state_dict(state["model"])
         if optimizer is not None:
             optimizer.load_state_dict(state["optimizer"])
         if sparse_optimizer is not None:
             sparse_optimizer.load_state_dict(state["sparse_optimizer"])
             
-        return LoadedCheckpoint(model=model, optimizer=optimizer, sparse_optimizer=sparse_optimizer)
+        return LoadedCheckpoint(model=self.model, optimizer=optimizer, sparse_optimizer=sparse_optimizer)
 
     def train(self):
         optimizer = AdamW(self.model.dense_grad_parameters(), lr=self.learning_rate)
@@ -265,7 +265,7 @@ class Trainer:
         eval_index = self.eval_dataset.get_index()
 
         metrics = None
-        index_emb = self.model.ad_forward(eval_index)
+        index_emb = model.ad_forward(eval_index)
         with tqdm(self.eval_dataloader, desc='Eval') as pbar:
             for batch in pbar:
                 user_emb, target_emb = model.eval_forward(batch)
