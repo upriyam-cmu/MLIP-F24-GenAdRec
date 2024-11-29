@@ -29,9 +29,9 @@ parser.add_argument("--user_feats", action="store_true")
 
 args = parser.parse_args()
 run_label = args.run_label
-conditional = args.conditional
-residual = args.residual
-user_feats = args.user_feats
+conditional = True          # args.conditional, always conditional
+residual = True             # args.residual,    always residual
+user_feats = False          # args.user_feats,  pretraining only on user ID models
 
 # %%
 batch_size = 1024
@@ -43,14 +43,10 @@ outputs_dir = os.path.join("outputs", run_label)
 
 # %%
 dataset_params = {
-    "data_dir": "raw_data",
-    "min_train_clks": 1,
-    "num_test_clks": 1,
-    "include_ad_non_clks": False,
-    "sequence_mode": False,
+    "data_dir": "data",
+    "augmented": True,
     "user_features": ["user", "gender", "age", "shopping", "occupation"] if user_feats else ["user"],
     "ad_features": ["cate", "brand", "customer", "campaign"],
-    "conditional_masking": True,
 }
 
 # %%

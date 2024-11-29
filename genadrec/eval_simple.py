@@ -27,19 +27,22 @@ parser.add_argument("--eval_model_id", type=str)
 parser.add_argument("--conditional", action="store_true")
 parser.add_argument("--residual", action="store_true")
 parser.add_argument("--user_feats", action="store_true")
+parser.add_argument("--augmented", action="store_true")
 
 args = parser.parse_args()
 run_label = args.run_label
 eval_model_id = args.eval_model_id
-conditional = args.conditional
-residual = args.residual
+conditional = True          # args.conditional, always conditional
+residual = True             # args.residual,    always residual
 user_feats = args.user_feats
+augmented = args.augmented
+
+assert user_feats != augmented, "specify training with user feats xor behavior log augmented data only"
 
 if run_label == "":
     run_label = '-'.join([
-        'conditional' if conditional else 'marginal',
-        'residual' if residual else 'independent',
         'user_fts' if user_feats else 'uid_only',
+        'bhvr_aug' if augmented else '',
     ])
 
 # %%
@@ -49,13 +52,9 @@ model_dir = os.path.join("models", run_label)
 # %%
 dataset_params = {
     "data_dir": "raw_data",
-    "min_train_clks": 1,
-    "num_test_clks": 1,
-    "include_ad_non_clks": False,
-    "sequence_mode": False,
+    "augmented": augmented,
     "user_features": ["user", "gender", "age", "shopping", "occupation"] if user_feats else ["user"],
     "ad_features": ["cate", "brand", "customer", "campaign"],
-    "conditional_masking": True,
 }
 # %%
 loss_eval_dataset = TaobaoDataset(mode="test", **dataset_params)
