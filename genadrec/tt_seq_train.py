@@ -17,7 +17,7 @@ from typing import NamedTuple
 from typing import Optional
 from typing import List
 from sequence_model.model import RNNSeqModel
-from dataset.taobao_behavior_dataset import TaobaoDataset
+from dataset.taobao_behavior_sequences import TaobaoSequenceDataset
 
 
 class LoadedCheckpoint(NamedTuple):
@@ -105,27 +105,23 @@ class Trainer:
             )
         
         elif self.model_type == ModelType.SEQ:
-            self.train_dataset = TaobaoDataset(
-                data_dir="raw_data",
-                min_ad_clicks=5,
-                mode="finetune",
-                sequence_mode=True,
+            self.train_dataset = TaobaoSequenceDataset(
+                data_dir="data",
+                is_train=True,
+                augmented=False,
                 user_features=["user"],  # ["user", "gender", "age", "shopping", "occupation"],
                 ad_features=["adgroup", "cate", "brand"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
-                conditional_masking=False
             )
 
             sampler = BatchSampler(RandomSampler(self.train_dataset), self.batch_size, False)
             self.train_dataloader = DataLoader(self.train_dataset, sampler=sampler, batch_size=None)
 
-            self.eval_dataset = TaobaoDataset(
-                data_dir="raw_data",
-                min_ad_clicks=5,
-                mode="test",
-                sequence_mode=True,
+            self.eval_dataset = TaobaoSequenceDataset(
+                data_dir="data",
+                is_train=False,
+                augmented=False,
                 user_features=["user"],  # ["user", "gender", "age", "shopping", "occupation"],
                 ad_features=["adgroup", "cate", "brand"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
-                conditional_masking=False
             )
 
             sampler = BatchSampler(RandomSampler(self.eval_dataset), self.eval_batch_size, False)
