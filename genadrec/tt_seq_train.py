@@ -129,6 +129,7 @@ class Trainer:
 
             self.model = RNNSeqModel(
                 n_users=self.train_dataset.n_users,
+                n_actions=self.train_dataset.n_actions,
                 ad_categorical_feats=[
                     #CategoricalFeature("adgroup_id", self.train_dataset.n_ads),
                     CategoricalFeature("brand_id", self.train_dataset.n_brands),

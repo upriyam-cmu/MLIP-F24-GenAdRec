@@ -14,6 +14,7 @@ from typing import List
 class RNNSeqModel(nn.Module):
     def __init__(self,
                  n_users: int,
+                 n_actions: int,
                  ad_categorical_feats: List[CategoricalFeature],
                  cell_type: str,
                  rnn_input_size,
@@ -49,7 +50,7 @@ class RNNSeqModel(nn.Module):
             device=device
         )
 
-        self.action_embedding = nn.Embedding(3, embedding_dim=rnn_input_size, padding_idx=1, max_norm=1, device=device)
+        self.action_embedding = nn.Embedding(n_actions+1, embedding_dim=rnn_input_size, max_norm=1, device=device)
         self.sampled_softmax = SampledSoftmaxLoss()
         self.device = device
     
@@ -66,7 +67,7 @@ class RNNSeqModel(nn.Module):
     def forward(self, batch: TaobaoInteractionsSeqBatch):
         user_emb = self.user_embedding(batch.user_feats)
         ad_emb = self.ad_embedding(batch.ad_feats)
-        action = batch.is_click + 1
+        action = batch.is_click + 2
         action_emb = self.action_embedding(action.to(self.device))
         is_click = batch.is_click == 1
 
@@ -87,7 +88,7 @@ class RNNSeqModel(nn.Module):
         seq_lengths = (~batch.is_padding).sum(axis=1)
         
         self.rnn.reset()
-        model_output = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2,1,1))[:, :-1, :]
+        model_output = self.rnn(input_emb, user_emb.swapaxes(0,1).repeat(2,1,1))[:, :-1, :]
 
         pos_ids = batch.ad_feats.adgroup_id[:, 1:][shifted_is_click].unsqueeze(1)
         neg_ids = torch.flatten(batch.ad_feats.adgroup_id)

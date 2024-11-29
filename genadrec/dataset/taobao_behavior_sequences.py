@@ -101,6 +101,10 @@ class TaobaoSequenceDataset(Dataset):
     def n_cates(self):
         return len(self.ad_feature["cate"].unique())
 
+    @cached_property
+    def n_actions(self):
+        return len(np.unique(self.interaction_data))
+
     def get_index(self):
         transformed_ad_feats = self.ad_encoder.transform(self.ad_feature.filter(pl.col("adgroup") > -1)).sort("adgroup")
         return AdBatch(**{feat+"_id": torch.tensor(transformed_ad_feats[feat].to_numpy()) for feat in self.ad_feats},
