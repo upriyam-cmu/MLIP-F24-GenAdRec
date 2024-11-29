@@ -38,7 +38,7 @@ batch_size = 1024
 learning_rate = 0.001
 pretrain_epochs = 1
 pretrain_save_eval_every = 2000
-model_dir = os.path.join("models", run_label)
+model_dir = os.path.join("saved_models", run_label)
 outputs_dir = os.path.join("outputs", run_label)
 
 # %%
@@ -108,7 +108,7 @@ for epoch in range(pretrain_epochs):
         for user_data, ads_features, ads_masks, _, _ in pbar:
             model.train()
             user_data = user_data.to(device)
-            ads_features = ads_features[:, :2].to(device)
+            ads_features = ads_features[:, :2].to(device, torch.int64)
             if conditional:
                 ads_masks = [None, ads_masks[0].to(device)]
             else:
@@ -144,7 +144,7 @@ for epoch in range(pretrain_epochs):
                         batches = 0
                         for user_data, ads_features, ads_masks, _, _ in pbar:
                             user_data = user_data.to(device)
-                            ads_features = ads_features[:, :2].to(device)
+                            ads_features = ads_features[:, :2].to(device, torch.int64)
                             ads_masks = [None, ads_masks[0].to(device)]
 
                             ad_feature_logits = model(user_data)

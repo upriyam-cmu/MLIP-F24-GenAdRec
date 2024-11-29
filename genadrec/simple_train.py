@@ -49,7 +49,7 @@ learning_rate = 0.0005
 train_epochs = 30
 eval_every_n = 1
 save_every_n = 1
-model_dir = os.path.join("models", run_label)
+model_dir = os.path.join("saved_models", run_label)
 outputs_dir = os.path.join("outputs", run_label)
 
 # %%
@@ -121,7 +121,7 @@ for epoch in range(start_epoch, train_epochs):
         train_losses = []
         for user_data, ads_features, ads_masks, _, _ in pbar:
             user_data = user_data.to(device)
-            ads_features = ads_features.to(device)
+            ads_features = ads_features.to(device, torch.int64)
             if conditional:
                 ads_masks = [None] + [mask.to(device) for mask in ads_masks]
             else:
@@ -149,7 +149,7 @@ for epoch in range(start_epoch, train_epochs):
                 batches = 0
                 for user_data, ads_features, ads_masks, _, _ in pbar:
                     user_data = user_data.to(device)
-                    ads_features = ads_features.to(device)
+                    ads_features = ads_features.to(device, torch.int64)
                     if conditional:
                         ads_masks = [None] + [mask.to(device) for mask in ads_masks]
                     else:

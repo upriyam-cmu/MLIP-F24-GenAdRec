@@ -47,7 +47,7 @@ if run_label == "":
 
 # %%
 batch_size = 1024
-model_dir = os.path.join("models", run_label)
+model_dir = os.path.join("saved_models", run_label)
 
 # %%
 dataset_params = {
@@ -97,7 +97,7 @@ with torch.inference_mode():
 
         for user_data, ads_features, ads_masks, _, _ in pbar:
             user_data = user_data.to(device)
-            ads_features = ads_features.to(device)
+            ads_features = ads_features.to(device, torch.int64)
             if conditional:
                 ads_masks = [None] + [mask.to(device) for mask in ads_masks]
             else:
