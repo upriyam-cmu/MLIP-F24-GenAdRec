@@ -13,7 +13,7 @@ class PolarsOrdinalEncoder:
             self.feat_num_unique_with_null[feat] = len(feat_encodings)
 
     def transform(self, data: pl.DataFrame) -> pl.DataFrame:
-        return data.select(pl.col(feat).replace_strict(**self.mappings[feat]) for feat in data.columns)
+        return data.select(pl.col(feat).replace_strict(**self.mappings[feat]) if feat in self.mappings else pl.col(feat) for feat in data.columns)
 
     def inverse_transform(self, data: pl.DataFrame) -> pl.DataFrame:
-        return data.select(pl.col(feat).replace_strict(**self.inverse_mappings[feat]) for feat in data.columns)
+        return data.select(pl.col(feat).replace_strict(**self.inverse_mappings[feat]) if feat in self.inverse_mappings else pl.col(feat) for feat in data.columns)

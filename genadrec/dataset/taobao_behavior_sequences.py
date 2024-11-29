@@ -46,10 +46,6 @@ class TaobaoSequenceDataset(Dataset):
         user_features: list[str] = ["user", "gender", "age", "shopping", "occupation"],    # all features by default
         ad_features: list[str] = ["adgroup", "cate", "brand", "customer", "campaign"],     # all features by default
     ):
-        user_profile_parquet = os.path.join(data_dir, f"user_profile.parquet")
-        ad_feature_parquet = os.path.join(data_dir, f"ad_feature.parquet")
-        assert os.path.isfile(user_profile_parquet), f"Cannot find user_profile file {user_profile_parquet}. Please generate using data_process notebooks"
-        assert os.path.isfile(ad_feature_parquet), f"Cannot find ad_feature file {ad_feature_parquet}. Please generate using data_process notebooks"
 
         self.is_train = is_train
         self.user_feats = user_features
@@ -59,18 +55,23 @@ class TaobaoSequenceDataset(Dataset):
         
         self.interaction_mapping = {-1: "ad_non_click" ,0: "browse", 1: "ad_click", 2: "favorite", 3: "add_to_cart", 4: "purchase"}
 
+        user_profile_parquet = os.path.join(data_dir, f"user_profile.parquet")
+        assert os.path.isfile(user_profile_parquet), f"Cannot find user_profile file {user_profile_parquet}. Please generate using data_process notebooks"
         self.user_profile = pl.read_parquet(user_profile_parquet)
         self.user_encoder = PolarsOrdinalEncoder(fit_data = self.user_profile)
 
+        ad_feature_params = f"timediff{min_timediff_unique}_mintrain{min_training_interactions}"
+        ad_feature_parquet = os.path.join(data_dir, f"ad_feature_{ad_feature_params}.parquet")
+        assert os.path.isfile(ad_feature_parquet), f"Cannot find ad_feature file {ad_feature_parquet}. Please generate using data_process notebooks"
         self.ad_feature = pl.read_parquet(ad_feature_parquet)
-        self.ad_encoder = PolarsOrdinalEncoder(fit_data = self.ad_feature)
+        self.ad_encoder = PolarsOrdinalEncoder(fit_data = self.ad_feature.select(pl.all().exclude("rel_ad_freq")))
 
         train_sequence_params = f"timediff{min_timediff_unique}_mintrain{min_training_interactions}_seqlen{sequence_len}_slide{slide_window_every}" + ("_aug" if augmented else "")
-        test_sequence_params = f"timediff{min_timediff_unique}_mintrain{min_training_interactions}_seqlen{sequence_len}" + ("_aug" if augmented else "")
-
         train_file = os.path.join(data_dir, f"train_data_{train_sequence_params}.npz")
-        test_file = os.path.join(data_dir, f"test_data_{test_sequence_params}.npz")
         assert os.path.isfile(train_file), f"Cannot find training data {train_file}. Please generate with data_process notebooks"
+
+        test_sequence_params = f"timediff{min_timediff_unique}_mintrain{min_training_interactions}_seqlen{sequence_len}" + ("_aug" if augmented else "")
+        test_file = os.path.join(data_dir, f"test_data_{test_sequence_params}.npz")
         assert os.path.isfile(test_file), f"Cannot find test data {test_file}. Please generate with data_process notebooks"
         
         if self.is_train:
@@ -111,11 +112,14 @@ class TaobaoSequenceDataset(Dataset):
     def n_actions(self):
         return len(np.unique(self.interaction_data))
 
-    def get_index(self):
+    def get_index(self, size = None):
         transformed_ad_feats = self.ad_encoder.transform(self.ad_feature.filter(pl.col("adgroup") > -1)).sort("adgroup")
-        return AdBatch(**{feat+"_id": torch.tensor(transformed_ad_feats[feat].to_numpy()) for feat in self.ad_feats},
+        random_indices = np.full(len(transformed_ad_feats), fill_value=True, dtype=bool)
+        if size is not None:
+            random_indices = np.random.choice(len(transformed_ad_feats), size, replace=False)
+        return AdBatch(**{feat+"_id": torch.tensor(transformed_ad_feats[feat].to_numpy()[random_indices]) for feat in self.ad_feats},
                        **{feat+"_id": None for feat in self.missing_ad_feats},
-                       rel_ad_freqs=None)
+                       rel_ad_freqs=transformed_ad_feats["rel_ad_freq"].to_numpy()[random_indices])
 
     def __len__(self):
         return len(self.seq_lens)
