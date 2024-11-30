@@ -38,6 +38,9 @@ class RNNSeqModel(nn.Module):
             device=device
         )
 
+        layer = nn.TransformerEncoderLayer(rnn_input_size, nhead=8)
+        self.transformer = nn.TransformerEncoder(layer, num_layers=rnn_num_layers)
+
         self.user_embedding = AdTower(
             categorical_features=user_categorical_feats,
             embedding_dim=rnn_hidden_size,
@@ -62,7 +65,8 @@ class RNNSeqModel(nn.Module):
             self.action_embedding.parameters(),
             self.ad_embedding.mlp.parameters(),
             self.user_embedding.mlp.parameters(),
-            self.rnn.parameters()
+            #self.rnn.parameters(),
+            self.transformer.parameters()
         )
 
     def sparse_grad_parameters(self):
@@ -81,8 +85,11 @@ class RNNSeqModel(nn.Module):
 
         shifted_is_click = is_click[:, 1:]
         
+        #import pdb; pdb.set_trace()
         self.rnn.reset()
-        model_output = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2, 1, 1))[:, :-1, :]
+        mask = torch.tril(torch.ones(L, L, dtype=bool, device=input_emb.device))
+        #model_output = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2, 1, 1))[:, :-1, :]
+        model_output = self.transformer(input_emb, mask=mask, is_causal=True)[:, :-1, :]
 
         q_probas = batch.ad_feats.rel_ad_freqs.to(torch.float32).to(self.device)
         
@@ -125,9 +132,11 @@ class RNNSeqModel(nn.Module):
         
         input_emb = ad_emb + action_emb
         self.rnn.reset()
-        output_emb = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2,1,1))
 
-        B, L, D = ad_emb.shape
+        B, L, D = input_emb.shape
+        #output_emb = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2,1,1))
+        mask = torch.tril(torch.ones(L, L, dtype=bool, device=input_emb.device))
+        output_emb = self.transformer(input_emb, mask=mask, is_causal=True)
         
         target_idx = (~batch.is_padding).sum(axis=1).unsqueeze(1) - 1
         batch_idx = torch.arange(B, device=ad_emb.device)
