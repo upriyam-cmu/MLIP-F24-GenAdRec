@@ -15,7 +15,7 @@ class AdEmbedder(nn.Module):
         super().__init__()
 
         self.embedding_modules = nn.ModuleDict({
-            feat.name: nn.Embedding(feat.num_classes, embedding_dim, sparse=True, device=device) 
+            feat.name: nn.Embedding(feat.num_classes, embedding_dim, sparse=True, device=device, padding_idx=0) 
             for feat in categorical_features
         })
         self.feat_has_nulls = {feat.name: feat.has_nulls for feat in categorical_features}

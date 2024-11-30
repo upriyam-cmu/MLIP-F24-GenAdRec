@@ -274,7 +274,7 @@ if __name__ == "__main__":
         model_type=ModelType.SEQ,
         learning_rate=0.001, # 0.0005 for two_tower
         eval_batch_size=1024,
-        train_batch_size=1024,
+        train_batch_size=32,
         embedding_dim=128,
         embedder_hidden_dims=[128],
         force_dataset_reload=False,
@@ -283,6 +283,7 @@ if __name__ == "__main__":
         user_features=["gender", "age", "shopping", "occupation"],
         ad_features=["cate", "brand"],
         behavior_log_augmented=False,
+        # save_dir_root="out_128_aug_uid_only/"
         # checkpoint_path="out/checkpoint_0.pt"
     )
     print("Model size:", sum(param.numel() for param in trainer.model.parameters()))

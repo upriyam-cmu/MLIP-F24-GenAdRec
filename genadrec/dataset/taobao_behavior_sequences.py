@@ -49,6 +49,7 @@ class TaobaoSequenceDataset(Dataset):
     ):
 
         self.is_train = is_train
+        self.augmented = augmented
         self.user_feats = user_features
         self.ad_feats = ad_features
         self.missing_ad_feats = set(["adgroup", "cate", "brand", "customer", "campaign"]).difference(self.ad_feats)
@@ -137,5 +138,5 @@ class TaobaoSequenceDataset(Dataset):
             self.interaction_data[idx, :max_batch_len],
             self.timestamps[idx, :max_batch_len],
             self.padded_masks[idx, :max_batch_len],
-            self.get_index(4096)
+            self.get_index(4096) if self.augmented else None
         )
