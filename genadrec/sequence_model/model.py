@@ -6,6 +6,7 @@ from embedding.ads import AdTower
 from itertools import chain
 from loss.softmax import SampledSoftmaxLoss
 from model.seq import RNN
+from model.mlp import L2NormalizationLayer
 from dataset.taobao_behavior_sequences import AdBatch
 from dataset.taobao_behavior_sequences import TaobaoInteractionsSeqBatch
 from typing import List
@@ -40,6 +41,7 @@ class RNNSeqModel(nn.Module):
 
         layer = nn.TransformerEncoderLayer(rnn_input_size, nhead=8)
         self.transformer = nn.TransformerEncoder(layer, num_layers=rnn_num_layers)
+        self.normalize = L2NormalizationLayer(dim=-1)
 
         self.user_embedding = AdTower(
             categorical_features=user_categorical_feats,
@@ -93,6 +95,7 @@ class RNNSeqModel(nn.Module):
         mask = torch.tril(torch.ones(L, L, dtype=bool, device=input_emb.device))
         #model_output = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2, 1, 1))[:, :-1, :]
         model_output = self.transformer(input_emb, mask=mask, is_causal=True)[:, :-1, :]
+        model_output = self.normalize(model_output)
 
         q_probas = batch.ad_feats.rel_ad_freqs.to(torch.float32).to(self.device)
         
@@ -144,6 +147,7 @@ class RNNSeqModel(nn.Module):
         #output_emb = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2,1,1))
         mask = torch.tril(torch.ones(L, L, dtype=bool, device=input_emb.device))
         output_emb = self.transformer(input_emb, mask=mask, is_causal=True)
+        output_emb = self.normalize(output_emb)
         
         target_idx = (~batch.is_padding).sum(axis=1).unsqueeze(1) - 1
         batch_idx = torch.arange(B, device=ad_emb.device)
