@@ -5,8 +5,10 @@ class PolarsOrdinalEncoder:
         self.mappings = {}
         self.inverse_mappings = {}
         self.feat_num_unique_with_null = {}
+        self.feat_has_null = {}
         for feat in fit_data.columns:
             feat_unique = fit_data[feat].unique().sort(nulls_last=True)
+            self.feat_has_null[feat] = feat_unique.has_nulls()
             feat_encodings = (feat_unique.rank("ordinal") - 1).cast(pl.Int32).replace(None, -1)
             self.mappings[feat] = {"old": feat_unique, "new": feat_encodings}
             self.inverse_mappings[feat] = {"old": feat_encodings, "new": feat_unique}

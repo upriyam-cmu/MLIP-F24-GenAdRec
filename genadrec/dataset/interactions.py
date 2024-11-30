@@ -12,6 +12,7 @@ from typing import NamedTuple
 class CategoricalFeature(NamedTuple):
     name: str
     num_classes: int
+    has_nulls: bool
 
 
 class UserBatch(NamedTuple):

@@ -15,10 +15,10 @@ class AdEmbedder(nn.Module):
         super().__init__()
 
         self.embedding_modules = nn.ModuleDict({
-            feat.name: nn.Embedding(feat.num_classes, embedding_dim, sparse=True, device=device) 
+            feat.name: nn.Embedding(feat.num_classes + (1 if feat.has_nulls else 0), embedding_dim, sparse=True, device=device) 
             for feat in categorical_features
         })
-        
+        self.feat_has_nulls = {feat: feat.has_nulls for feat in categorical_features}
         self.embedding_dim = embedding_dim
         self.device = device
     
@@ -30,8 +30,7 @@ class AdEmbedder(nn.Module):
         x = []
         for feat, id in batch._asdict().items():
             if feat in self.embedding_modules.keys():
-                if id.min() == -1:
-                    # TODO: Deal properly with min(brand) == -1
+                if self.feat_has_nulls[feat]:
                     id = id + 1
                 x.append(self.embedding_modules[feat](id.to(torch.int32).to(self.device)))
         return torch.cat(x, axis=-1)

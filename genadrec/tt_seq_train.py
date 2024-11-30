@@ -133,20 +133,31 @@ class Trainer:
 
             if self.use_user_feats:
                 user_categorical_feats = [
-                    CategoricalFeature(feat, self.train_dataset.user_encoder.feat_num_unique_with_null[feat]) for feat in self.train_dataset.user_feats
-                    if feat != "user"
+                    CategoricalFeature(
+                        name=feat, 
+                        num_classes=self.train_dataset.user_encoder.feat_num_unique_with_null[feat],
+                        has_nulls=self.train_dataset.user_encoder.feat_has_null[feat]
+                    ) for feat in self.train_dataset.user_feats if feat != "user"
                 ]
             else:
-                user_categorical_feats = [CategoricalFeature("user", self.train_dataset.user_encoder.feat_num_unique_with_null["user"])]
+                user_categorical_feats = [
+                    CategoricalFeature(
+                        name="user", 
+                        num_classes=self.train_dataset.user_encoder.feat_num_unique_with_null["user"],
+                        has_nulls=self.train_dataset.user_encoder.feat_has_null["user"]
+                    )
+                ]
 
             self.model = RNNSeqModel(
                 n_users=self.train_dataset.n_users,
                 n_actions=self.train_dataset.n_actions,
                 user_categorical_feats=user_categorical_feats,
                 ad_categorical_feats=[
-                    #CategoricalFeature("adgroup_id", self.train_dataset.n_ads),
-                    CategoricalFeature("brand_id", self.train_dataset.n_brands),
-                    CategoricalFeature("cate_id", self.train_dataset.n_cates),
+                    CategoricalFeature(
+                        name=feat+"_id", 
+                        num_classes=self.train_dataset.ad_encoder.feat_num_unique_with_null[feat],
+                        has_nulls=self.train_dataset.ad_encoder.feat_has_null[feat],
+                    ) for feat in ["brand", "cate"]
                 ],
                 cell_type=self.seq_rnn_cell_type,
                 rnn_input_size=self.embedding_dim,
@@ -172,19 +183,30 @@ class Trainer:
         if model is None and self.model_type == ModelType.SEQ:
             if self.use_user_feats:
                 user_categorical_feats = [
-                    CategoricalFeature(feat, self.train_dataset.user_encoder.feat_num_unique_with_null[feat]) for feat in self.train_dataset.user_feats
-                    if feat != "user"
+                    CategoricalFeature(
+                        name=feat, 
+                        num_classes=self.train_dataset.user_encoder.feat_num_unique_with_null[feat],
+                        has_nulls=self.train_dataset.user_encoder.feat_has_null[feat]
+                    ) for feat in self.train_dataset.user_feats if feat != "user"
                 ]
             else:
-                user_categorical_feats = [CategoricalFeature("user", self.train_dataset.user_encoder.feat_num_unique_with_null["user"])]
+                user_categorical_feats = [
+                    CategoricalFeature(
+                        name="user", 
+                        num_classes=self.train_dataset.user_encoder.feat_num_unique_with_null["user"],
+                        has_nulls=self.train_dataset.user_encoder.feat_has_null["user"]
+                    )
+                ]
             self.model = RNNSeqModel(
                 n_users=self.train_dataset.n_users,
                 n_actions=self.train_dataset.n_actions,
                 user_categorical_feats=user_categorical_feats,
                 ad_categorical_feats=[
-                    #CategoricalFeature("adgroup_id", self.train_dataset.n_ads),
-                    CategoricalFeature("brand_id", self.train_dataset.n_brands),
-                    CategoricalFeature("cate_id", self.train_dataset.n_cates),
+                    CategoricalFeature(
+                        name=feat+"_id", 
+                        num_classes=self.train_dataset.ad_encoder.feat_num_unique_with_null[feat],
+                        has_nulls=self.train_dataset.ad_encoder.feat_has_null[feat],
+                    ) for feat in ["brand", "cate"]
                 ],
                 cell_type=self.seq_rnn_cell_type,
                 rnn_input_size=self.embedding_dim,
