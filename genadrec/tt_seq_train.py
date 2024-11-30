@@ -45,6 +45,7 @@ class Trainer:
                  embedder_hidden_dims: Optional[List[int]] = [1024, 512, 128],
                  seq_rnn_cell_type: str = "GRU",
                  seq_rnn_num_layers: int = 2,
+                 behavior_log_augmented: bool = False,
                  use_user_feats: bool = True,
                  force_dataset_reload: bool = False,
                  checkpoint_path: Optional[str] = None,
@@ -62,6 +63,7 @@ class Trainer:
         self.embedder_hidden_dims = embedder_hidden_dims
         self.seq_rnn_cell_type = seq_rnn_cell_type
         self.seq_rnn_num_layers = seq_rnn_num_layers
+        self.behavior_log_augmented = behavior_log_augmented
         self.use_user_feats = use_user_feats
         self.force_dataset_reload = force_dataset_reload
         self.checkpoint_path = checkpoint_path
@@ -110,7 +112,7 @@ class Trainer:
             self.train_dataset = TaobaoSequenceDataset(
                 data_dir="data",
                 is_train=True,
-                augmented=False,
+                augmented=self.behavior_log_augmented,
                 user_features=["user", "gender", "age", "shopping", "occupation"],
                 ad_features=["adgroup", "cate", "brand"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
             )
@@ -121,7 +123,7 @@ class Trainer:
             self.eval_dataset = TaobaoSequenceDataset(
                 data_dir="data",
                 is_train=False,
-                augmented=False,
+                augmented=self.behavior_log_augmented,
                 user_features=["user", "gender", "age", "shopping", "occupation"],
                 ad_features=["adgroup", "cate", "brand"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
             )
@@ -152,6 +154,7 @@ class Trainer:
                 rnn_num_layers=self.seq_rnn_num_layers,
                 device=self.device,
                 embedder_hidden_dims=self.embedder_hidden_dims,
+                use_random_negs=self.behavior_log_augmented,
                 rnn_batch_first=True
             )
             
@@ -189,6 +192,7 @@ class Trainer:
                 rnn_num_layers=self.seq_rnn_num_layers,
                 device=self.device,
                 embedder_hidden_dims=self.embedder_hidden_dims,
+                use_random_negs=self.behavior_log_augmented,
                 rnn_batch_first=True
             )
         
@@ -316,13 +320,13 @@ if __name__ == "__main__":
         learning_rate=0.001, # 0.0005 for two_tower
         eval_batch_size=1024,
         train_batch_size=32,
-        embedding_dim=64,
-        embedder_hidden_dims=[64],
+        embedding_dim=128,
+        embedder_hidden_dims=[128],
         force_dataset_reload=False,
         save_model_every_n=1,
         train_eval_every_n=1,
-        # checkpoint_path="out/checkpoint_15.pt"
+        behavior_log_augmented=False
     )
-    print("Model size:", sum(param.size() for param in trainer.model.parameters()))
+    print("Model size:", sum(param.numel() for param in trainer.model.parameters()))
     # trainer.eval()
     trainer.train()

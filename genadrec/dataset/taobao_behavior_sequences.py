@@ -31,6 +31,7 @@ class TaobaoInteractionsSeqBatch(NamedTuple):
     is_click: np.array
     timestamp: np.array
     is_padding: np.array
+    train_index: AdBatch
 
 
 class TaobaoSequenceDataset(Dataset):
@@ -114,12 +115,13 @@ class TaobaoSequenceDataset(Dataset):
 
     def get_index(self, size = None):
         transformed_ad_feats = self.ad_encoder.transform(self.ad_feature.filter(pl.col("adgroup") > -1)).sort("adgroup")
+        rel_ad_freqs = transformed_ad_feats["rel_ad_freq"].fill_null(0.0).to_numpy()
         random_indices = np.full(len(transformed_ad_feats), fill_value=True, dtype=bool)
         if size is not None:
-            random_indices = np.random.choice(len(transformed_ad_feats), size, replace=False)
+            random_indices = np.random.choice(len(transformed_ad_feats), size, p=rel_ad_freqs, replace=False)
         return AdBatch(**{feat+"_id": torch.tensor(transformed_ad_feats[feat].to_numpy()[random_indices]) for feat in self.ad_feats},
                        **{feat+"_id": None for feat in self.missing_ad_feats},
-                       rel_ad_freqs=transformed_ad_feats["rel_ad_freq"].to_numpy()[random_indices])
+                       rel_ad_freqs=rel_ad_freqs[random_indices])
 
     def __len__(self):
         return len(self.seq_lens)
@@ -134,5 +136,6 @@ class TaobaoSequenceDataset(Dataset):
                     rel_ad_freqs=self.rel_ad_freqs[idx, :max_batch_len]),
             self.interaction_data[idx, :max_batch_len],
             self.timestamps[idx, :max_batch_len],
-            self.padded_masks[idx, :max_batch_len]
+            self.padded_masks[idx, :max_batch_len],
+            self.get_index(size=4096)
         )

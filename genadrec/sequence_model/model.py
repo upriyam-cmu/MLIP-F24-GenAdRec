@@ -6,8 +6,8 @@ from embedding.ads import AdTower
 from itertools import chain
 from loss.softmax import SampledSoftmaxLoss
 from model.seq import RNN
-from dataset.taobao_behavior_dataset import AdBatch
-from dataset.taobao_behavior_dataset import TaobaoInteractionsSeqBatch
+from dataset.taobao_behavior_sequences import AdBatch
+from dataset.taobao_behavior_sequences import TaobaoInteractionsSeqBatch
 from typing import List
 
 
@@ -24,6 +24,7 @@ class RNNSeqModel(nn.Module):
                  device,
                  embedder_hidden_dims,
                  rnn_batch_first=True,
+                 use_random_negs=False,
                  ) -> None:
         
         super().__init__()
@@ -51,6 +52,7 @@ class RNNSeqModel(nn.Module):
             device=device
         )
 
+        self.use_random_negs = use_random_negs
         self.action_embedding = nn.Embedding(n_actions+1, embedding_dim=rnn_input_size, max_norm=1, device=device)
         self.sampled_softmax = SampledSoftmaxLoss()
         self.device = device
@@ -80,28 +82,36 @@ class RNNSeqModel(nn.Module):
         shifted_is_click = is_click[:, 1:]
         
         self.rnn.reset()
-        model_output = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2,1,1))[:, :-1, :]
+        model_output = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2, 1, 1))[:, :-1, :]
 
-        pos_ids = batch.ad_feats.adgroup_id[:, 1:][shifted_is_click].unsqueeze(1)
-        neg_ids = torch.flatten(batch.ad_feats.adgroup_id)
+        q_probas = batch.ad_feats.rel_ad_freqs.to(torch.float32).to(self.device)
         
-        pos_neg_mask = (
-            (pos_ids != neg_ids) & ((~batch.is_padding).flatten())
-        ).to(self.device)
+        # Extract positive examples
+        pos_ids = batch.ad_feats.adgroup_id[:, 1:][shifted_is_click].unsqueeze(1)
         target_emb = ad_emb[:, 1:, :][shifted_is_click, :]
         pos_emb = model_output[shifted_is_click, :]
-        q_probas = batch.ad_feats.rel_ad_freqs.to(torch.float32).to(self.device)
-        neg_emb = torch.flatten(ad_emb, start_dim=0, end_dim=1)
         pos_q_probas = q_probas[:, 1:][shifted_is_click]
-
-        #import pdb; pdb.set_trace()
+        
+        # Extract negative examples
+        if self.use_random_negs:
+            neg_ids = batch.train_index.adgroup_id
+            neg_emb = self.ad_forward(batch.train_index)
+            neg_q_probas = batch.train_index.rel_ad_freqs.to(torch.float32).to(self.device)
+            pos_neg_mask = (pos_ids != neg_ids).to(self.device)
+        else:
+            neg_ids = torch.flatten(batch.ad_feats.adgroup_id)
+            neg_emb = torch.flatten(ad_emb, start_dim=0, end_dim=1)
+            neg_q_probas = q_probas.flatten()
+            pos_neg_mask = (
+                (pos_ids != neg_ids) & ((~batch.is_padding).flatten())
+            ).to(self.device)
 
         loss = self.sampled_softmax.forward(
             pos_emb=pos_emb,
             target_emb=target_emb,
             neg_emb=neg_emb,
             pos_q_probas=pos_q_probas,
-            neg_q_probas=q_probas.flatten(),
+            neg_q_probas=neg_q_probas,
             pos_neg_mask=pos_neg_mask.to(torch.float32)
         )
 
