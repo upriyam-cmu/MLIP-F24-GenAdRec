@@ -67,6 +67,10 @@ class TaobaoSequenceDataset(Dataset):
         self.ad_feature = pl.read_parquet(ad_feature_parquet)
         self.ad_encoder = PolarsOrdinalEncoder(fit_data = self.ad_feature.select(pl.all().exclude("rel_ad_freq")))
 
+        transformed_ad_feats = self.ad_encoder.transform(self.ad_feature.filter(pl.col("adgroup") > -1)).sort("adgroup")
+        self.rel_ad_freqs_index = transformed_ad_feats["rel_ad_freq"].fill_null(0.0).to_numpy()
+        self.transformed_ad_feats = {feat: transformed_ad_feats[feat].to_numpy() for feat in self.ad_feats}
+
         train_sequence_params = f"timediff{min_timediff_unique}_mintrain{min_training_interactions}_seqlen{sequence_len}_slide{slide_window_every}" + ("_aug" if augmented else "")
         train_file = os.path.join(data_dir, f"train_data_{train_sequence_params}.npz")
         assert os.path.isfile(train_file), f"Cannot find training data {train_file}. Please generate with data_process notebooks"
@@ -95,33 +99,31 @@ class TaobaoSequenceDataset(Dataset):
 
     @cached_property
     def n_users(self):
-        return len(self.user_profile["user"].unique())
+        return self.user_encoder.feat_num_unique_with_null["user"]+1
 
     @cached_property
     def n_ads(self):
-        return len(self.ad_feature["adgroup"].unique())
+        return self.ad_encoder.feat_num_unique_with_null["adgroup"]+1
 
     @cached_property
     def n_brands(self):
-        return len(self.ad_feature["brand"].unique())
+        return self.ad_encoder.feat_num_unique_with_null["brand"]+1
 
     @cached_property
     def n_cates(self):
-        return len(self.ad_feature["cate"].unique())
+        return self.ad_encoder.feat_num_unique_with_null["cate"]+1
 
     @cached_property
     def n_actions(self):
         return len(np.unique(self.interaction_data))
 
     def get_index(self, size = None):
-        transformed_ad_feats = self.ad_encoder.transform(self.ad_feature.filter(pl.col("adgroup") > -1)).sort("adgroup")
-        rel_ad_freqs = transformed_ad_feats["rel_ad_freq"].fill_null(0.0).to_numpy()
-        random_indices = np.full(len(transformed_ad_feats), fill_value=True, dtype=bool)
+        random_indices = np.full(len(self.rel_ad_freqs_index), fill_value=True, dtype=bool)
         if size is not None:
-            random_indices = np.random.choice(len(transformed_ad_feats), size, p=rel_ad_freqs, replace=False)
-        return AdBatch(**{feat+"_id": torch.tensor(transformed_ad_feats[feat].to_numpy()[random_indices]) for feat in self.ad_feats},
+            random_indices = np.random.choice(len(self.rel_ad_freqs_index), size, p=self.rel_ad_freqs_index, replace=False)
+        return AdBatch(**{feat+"_id": self.transformed_ad_feats[feat][random_indices] for feat in self.ad_feats},
                        **{feat+"_id": None for feat in self.missing_ad_feats},
-                       rel_ad_freqs=rel_ad_freqs[random_indices])
+                       rel_ad_freqs=self.rel_ad_freqs_index[random_indices])
 
     def __len__(self):
         return len(self.seq_lens)
@@ -137,5 +139,5 @@ class TaobaoSequenceDataset(Dataset):
             self.interaction_data[idx, :max_batch_len],
             self.timestamps[idx, :max_batch_len],
             self.padded_masks[idx, :max_batch_len],
-            self.get_index(size=4096)
+            self.get_index(4096)
         )

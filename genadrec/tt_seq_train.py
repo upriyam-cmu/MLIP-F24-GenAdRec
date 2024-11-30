@@ -325,7 +325,8 @@ if __name__ == "__main__":
         force_dataset_reload=False,
         save_model_every_n=1,
         train_eval_every_n=1,
-        behavior_log_augmented=False
+        use_user_feats=True,
+        behavior_log_augmented=True,
     )
     print("Model size:", sum(param.numel() for param in trainer.model.parameters()))
     # trainer.eval()
