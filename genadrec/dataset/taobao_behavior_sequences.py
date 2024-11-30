@@ -85,8 +85,6 @@ class TaobaoSequenceDataset(Dataset):
             data = np.load(test_file)
 
         user_feat_map = {"user": 0, "gender": 1, "age": 2, "shopping": 3, "occupation": 4}
-        # user_feat_indices = [user_feat_map[feat] for feat in self.user_feats]
-        # self.user_data = data["user_data"][:, user_feat_indices]
         self.user_data = {feat: data["user_data"][:, user_feat_map[feat]] for feat in self.user_feats}
         self.ads_data = {feat: data[feat] for feat in self.ad_feats}
         self.rel_ad_freqs = data["rel_ad_freqs"]
@@ -121,9 +119,9 @@ class TaobaoSequenceDataset(Dataset):
         random_indices = np.full(len(self.rel_ad_freqs_index), fill_value=True, dtype=bool)
         if size is not None:
             random_indices = np.random.choice(len(self.rel_ad_freqs_index), size, p=self.rel_ad_freqs_index, replace=False)
-        return AdBatch(**{feat+"_id": self.transformed_ad_feats[feat][random_indices] for feat in self.ad_feats},
+        return AdBatch(**{feat+"_id": torch.tensor(self.transformed_ad_feats[feat][random_indices]) for feat in self.ad_feats},
                        **{feat+"_id": None for feat in self.missing_ad_feats},
-                       rel_ad_freqs=self.rel_ad_freqs_index[random_indices])
+                       rel_ad_freqs = torch.tensor(self.rel_ad_freqs_index[random_indices]))
 
     def __len__(self):
         return len(self.seq_lens)
