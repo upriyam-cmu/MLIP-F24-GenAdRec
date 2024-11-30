@@ -132,11 +132,15 @@ class RNNSeqModel(nn.Module):
         ad_emb = self.ad_embedding(batch.ad_feats)
         action = batch.is_click + 2
         action_emb = self.action_embedding(action.to(self.device))
-        
-        input_emb = ad_emb + action_emb
-        self.rnn.reset()
 
-        B, L, D = input_emb.shape
+        B, L, D = ad_emb.shape
+        
+        position_emb = self.wpe(torch.arange(L, device=ad_emb.device)).unsqueeze(0)
+        user_emb = user_emb.unsqueeze(1)
+
+        input_emb = ad_emb + action_emb + position_emb + user_emb
+
+        self.rnn.reset()
         #output_emb = self.rnn(input_emb, user_emb.unsqueeze(0).repeat(2,1,1))
         mask = torch.tril(torch.ones(L, L, dtype=bool, device=input_emb.device))
         output_emb = self.transformer(input_emb, mask=mask, is_causal=True)
