@@ -45,8 +45,8 @@ class Trainer:
                  embedder_hidden_dims: Optional[List[int]] = [1024, 512, 128],
                  seq_rnn_cell_type: str = "GRU",
                  seq_rnn_num_layers: int = 2,
-                 user_features: list[str] = ["user", "gender", "age", "shopping", "occupation"],
-                 ad_features: list[str] = ["adgroup", "cate", "brand"],
+                 user_features: list[str] = ["gender", "age", "shopping", "occupation"],
+                 ad_features: list[str] = ["cate", "brand"],
                  behavior_log_augmented: bool = False,
                  force_dataset_reload: bool = False,
                  checkpoint_path: Optional[str] = None,
@@ -115,8 +115,6 @@ class Trainer:
                 data_dir="data",
                 is_train=True,
                 augmented=self.behavior_log_augmented,
-                user_features=self.user_features,
-                ad_features=self.ad_features,
             )
 
             sampler = BatchSampler(RandomSampler(self.train_dataset), self.batch_size, False)
@@ -126,8 +124,6 @@ class Trainer:
                 data_dir="data",
                 is_train=False,
                 augmented=self.behavior_log_augmented,
-                user_features=self.user_features,
-                ad_features=self.ad_features,
             )
 
             sampler = BatchSampler(RandomSampler(self.eval_dataset), self.eval_batch_size, False)
@@ -145,7 +141,7 @@ class Trainer:
                     name=feat+"_id", 
                     num_classes=self.train_dataset.ad_encoder.feat_num_unique_with_null[feat]+1,
                     has_nulls=self.train_dataset.ad_encoder.feat_has_null[feat],
-                ) for feat in ["brand", "cate"]
+                ) for feat in self.ad_features
             ]
 
             self.model = RNNSeqModel(
@@ -320,7 +316,7 @@ if __name__ == "__main__":
         save_model_every_n=1,
         train_eval_every_n=1,
         user_features=["gender", "age", "shopping", "occupation"],
-        ad_features=["adgroup", "cate", "brand"],
+        ad_features=["cate", "brand"],
         behavior_log_augmented=False,
     )
     print("Model size:", sum(param.numel() for param in trainer.model.parameters()))
