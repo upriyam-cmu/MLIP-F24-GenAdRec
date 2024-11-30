@@ -18,7 +18,7 @@ class AdEmbedder(nn.Module):
             feat.name: nn.Embedding(feat.num_classes + (1 if feat.has_nulls else 0), embedding_dim, sparse=True, device=device) 
             for feat in categorical_features
         })
-        self.feat_has_nulls = {feat: feat.has_nulls for feat in categorical_features}
+        self.feat_has_nulls = {feat.name: feat.has_nulls for feat in categorical_features}
         self.embedding_dim = embedding_dim
         self.device = device
     
