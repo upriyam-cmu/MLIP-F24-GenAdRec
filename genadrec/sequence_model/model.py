@@ -57,6 +57,7 @@ class RNNSeqModel(nn.Module):
 
         self.use_random_negs = use_random_negs
         self.action_embedding = nn.Embedding(n_actions+1, embedding_dim=rnn_input_size, max_norm=1, device=device)
+        self.wpe = nn.Embedding(128, embedding_dim=rnn_input_size, max_norm=1, device=device)
         self.sampled_softmax = SampledSoftmaxLoss()
         self.device = device
     
@@ -80,8 +81,9 @@ class RNNSeqModel(nn.Module):
         is_click = batch.is_click == 1
 
         B, L, D = ad_emb.shape
+        position_emb = self.wpe(torch.arange(L, device=ad_emb.device).unsqueeze(0).repeat(B, 1, 1))
 
-        input_emb = ad_emb + action_emb
+        input_emb = ad_emb + action_emb + position_emb
 
         shifted_is_click = is_click[:, 1:]
         
