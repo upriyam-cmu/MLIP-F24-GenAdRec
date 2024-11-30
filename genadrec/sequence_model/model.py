@@ -81,9 +81,10 @@ class RNNSeqModel(nn.Module):
         is_click = batch.is_click == 1
 
         B, L, D = ad_emb.shape
-        position_emb = self.wpe(torch.arange(L, device=ad_emb.device).unsqueeze(0).repeat(B, 1, 1))
+        position_emb = self.wpe(torch.arange(L, device=ad_emb.device)).unsqueeze(0)
+        user_emb = user_emb.unsqueeze(1)
 
-        input_emb = ad_emb + action_emb + position_emb
+        input_emb = ad_emb + action_emb + position_emb + user_emb
 
         shifted_is_click = is_click[:, 1:]
         
