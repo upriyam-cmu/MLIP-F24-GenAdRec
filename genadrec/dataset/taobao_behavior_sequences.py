@@ -99,19 +99,19 @@ class TaobaoSequenceDataset(Dataset):
 
     @cached_property
     def n_users(self):
-        return self.user_encoder.feat_num_unique_with_null["user"]+1
+        return self.user_encoder.feat_num_unique_with_null["user"]
 
     @cached_property
     def n_ads(self):
-        return self.ad_encoder.feat_num_unique_with_null["adgroup"]+1
+        return self.ad_encoder.feat_num_unique_with_null["adgroup"]
 
     @cached_property
     def n_brands(self):
-        return self.ad_encoder.feat_num_unique_with_null["brand"]+1
+        return self.ad_encoder.feat_num_unique_with_null["brand"]
 
     @cached_property
     def n_cates(self):
-        return self.ad_encoder.feat_num_unique_with_null["cate"]+1
+        return self.ad_encoder.feat_num_unique_with_null["cate"]
 
     @cached_property
     def n_actions(self):

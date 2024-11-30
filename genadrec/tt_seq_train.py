@@ -45,8 +45,9 @@ class Trainer:
                  embedder_hidden_dims: Optional[List[int]] = [1024, 512, 128],
                  seq_rnn_cell_type: str = "GRU",
                  seq_rnn_num_layers: int = 2,
+                 user_features: list[str] = ["user", "gender", "age", "shopping", "occupation"],
+                 ad_features: list[str] = ["adgroup", "cate", "brand"],
                  behavior_log_augmented: bool = False,
-                 use_user_feats: bool = True,
                  force_dataset_reload: bool = False,
                  checkpoint_path: Optional[str] = None,
                  save_dir_root: str = "out/"
@@ -63,8 +64,9 @@ class Trainer:
         self.embedder_hidden_dims = embedder_hidden_dims
         self.seq_rnn_cell_type = seq_rnn_cell_type
         self.seq_rnn_num_layers = seq_rnn_num_layers
+        self.user_features = user_features
+        self.ad_features = ad_features
         self.behavior_log_augmented = behavior_log_augmented
-        self.use_user_feats = use_user_feats
         self.force_dataset_reload = force_dataset_reload
         self.checkpoint_path = checkpoint_path
         self.save_dir_root = save_dir_root
@@ -113,8 +115,8 @@ class Trainer:
                 data_dir="data",
                 is_train=True,
                 augmented=self.behavior_log_augmented,
-                user_features=["user", "gender", "age", "shopping", "occupation"],
-                ad_features=["adgroup", "cate", "brand"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
+                user_features=self.user_features,
+                ad_features=self.ad_features,
             )
 
             sampler = BatchSampler(RandomSampler(self.train_dataset), self.batch_size, False)
@@ -124,41 +126,33 @@ class Trainer:
                 data_dir="data",
                 is_train=False,
                 augmented=self.behavior_log_augmented,
-                user_features=["user", "gender", "age", "shopping", "occupation"],
-                ad_features=["adgroup", "cate", "brand"],  # ["cate", "brand", "customer", "campaign", "adgroup"],
+                user_features=self.user_features,
+                ad_features=self.ad_features,
             )
 
             sampler = BatchSampler(RandomSampler(self.eval_dataset), self.eval_batch_size, False)
             self.eval_dataloader = DataLoader(self.eval_dataset, sampler=sampler, batch_size=None)
 
-            if self.use_user_feats:
-                user_categorical_feats = [
-                    CategoricalFeature(
-                        name=feat, 
-                        num_classes=self.train_dataset.user_encoder.feat_num_unique_with_null[feat],
-                        has_nulls=self.train_dataset.user_encoder.feat_has_null[feat]
-                    ) for feat in self.train_dataset.user_feats if feat != "user"
-                ]
-            else:
-                user_categorical_feats = [
-                    CategoricalFeature(
-                        name="user", 
-                        num_classes=self.train_dataset.user_encoder.feat_num_unique_with_null["user"],
-                        has_nulls=self.train_dataset.user_encoder.feat_has_null["user"]
-                    )
-                ]
+            self.user_categorical_feats = [
+                CategoricalFeature(
+                    name=feat, 
+                    num_classes=self.train_dataset.user_encoder.feat_num_unique_with_null[feat]+1,
+                    has_nulls=self.train_dataset.user_encoder.feat_has_null[feat]
+                ) for feat in self.user_features
+            ]
+            self.ad_categorical_feats = [
+                CategoricalFeature(
+                    name=feat+"_id", 
+                    num_classes=self.train_dataset.ad_encoder.feat_num_unique_with_null[feat]+1,
+                    has_nulls=self.train_dataset.ad_encoder.feat_has_null[feat],
+                ) for feat in ["brand", "cate"]
+            ]
 
             self.model = RNNSeqModel(
                 n_users=self.train_dataset.n_users,
                 n_actions=self.train_dataset.n_actions,
-                user_categorical_feats=user_categorical_feats,
-                ad_categorical_feats=[
-                    CategoricalFeature(
-                        name=feat+"_id", 
-                        num_classes=self.train_dataset.ad_encoder.feat_num_unique_with_null[feat],
-                        has_nulls=self.train_dataset.ad_encoder.feat_has_null[feat],
-                    ) for feat in ["brand", "cate"]
-                ],
+                user_categorical_feats=self.user_categorical_feats,
+                ad_categorical_feats=self.ad_categorical_feats,
                 cell_type=self.seq_rnn_cell_type,
                 rnn_input_size=self.embedding_dim,
                 rnn_hidden_size=self.embedding_dim,
@@ -179,35 +173,13 @@ class Trainer:
                         sparse_optimizer: Module = None) -> LoadedCheckpoint:
         state = torch.load(path, map_location=self.device)
         if model is None and self.model_type == ModelType.TWO_TOWER:
-            model = TwoTowerModel(ads_categorical_features=self.train_dataset.categorical_features, ads_hidden_dims=self.embedder_hidden_dims, n_users=self.train_dataset.n_users, embedding_dim=self.embedding_dim, use_user_ids=True, device=self.device)
+            self.model = TwoTowerModel(ads_categorical_features=self.train_dataset.categorical_features, ads_hidden_dims=self.embedder_hidden_dims, n_users=self.train_dataset.n_users, embedding_dim=self.embedding_dim, use_user_ids=True, device=self.device)
         if model is None and self.model_type == ModelType.SEQ:
-            if self.use_user_feats:
-                user_categorical_feats = [
-                    CategoricalFeature(
-                        name=feat, 
-                        num_classes=self.train_dataset.user_encoder.feat_num_unique_with_null[feat],
-                        has_nulls=self.train_dataset.user_encoder.feat_has_null[feat]
-                    ) for feat in self.train_dataset.user_feats if feat != "user"
-                ]
-            else:
-                user_categorical_feats = [
-                    CategoricalFeature(
-                        name="user", 
-                        num_classes=self.train_dataset.user_encoder.feat_num_unique_with_null["user"],
-                        has_nulls=self.train_dataset.user_encoder.feat_has_null["user"]
-                    )
-                ]
             self.model = RNNSeqModel(
                 n_users=self.train_dataset.n_users,
                 n_actions=self.train_dataset.n_actions,
-                user_categorical_feats=user_categorical_feats,
-                ad_categorical_feats=[
-                    CategoricalFeature(
-                        name=feat+"_id", 
-                        num_classes=self.train_dataset.ad_encoder.feat_num_unique_with_null[feat],
-                        has_nulls=self.train_dataset.ad_encoder.feat_has_null[feat],
-                    ) for feat in ["brand", "cate"]
-                ],
+                user_categorical_feats=self.user_categorical_feats,
+                ad_categorical_feats=self.ad_categorical_feats,
                 cell_type=self.seq_rnn_cell_type,
                 rnn_input_size=self.embedding_dim,
                 rnn_hidden_size=self.embedding_dim,
@@ -347,8 +319,9 @@ if __name__ == "__main__":
         force_dataset_reload=False,
         save_model_every_n=1,
         train_eval_every_n=1,
-        use_user_feats=True,
-        behavior_log_augmented=True,
+        user_features=["gender", "age", "shopping", "occupation"],
+        ad_features=["adgroup", "cate", "brand"],
+        behavior_log_augmented=False,
     )
     print("Model size:", sum(param.numel() for param in trainer.model.parameters()))
     # trainer.eval()
