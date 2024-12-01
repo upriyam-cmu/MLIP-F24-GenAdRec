@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 
-def build_mlp(in_dim, hidden_dims, out_dim):
+def build_mlp(in_dim, hidden_dims, out_dim, normalize=True):
     mlp = nn.Sequential(
         nn.Linear(in_dim, hidden_dims[0]),
         nn.SiLU()
@@ -12,7 +12,8 @@ def build_mlp(in_dim, hidden_dims, out_dim):
         mlp.append(nn.SiLU())
     
     mlp.append(nn.Linear(hidden_dims[-1], out_dim))
-    mlp.append(L2NormalizationLayer(dim=-1))
+    if normalize:
+        mlp.append(L2NormalizationLayer(dim=-1))
     return mlp
 
 

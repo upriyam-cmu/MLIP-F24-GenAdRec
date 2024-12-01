@@ -27,16 +27,16 @@ class ModelType(Enum):
 
 class Trainer:
     def __init__(self,
-                 model_type: ModelType,
+                 model_type: ModelType = ModelType.SEQ,
                  train_epochs: int = 100,
                  train_batch_size: int = 32,
-                 eval_batch_size: int = 64,
-                 embedding_dim: int = 64,
+                 eval_batch_size: int = 1024,
+                 embedding_dim: int = 128,
                  learning_rate: float = 0.001,
                  train_eval_every_n: int = 1,
                  save_model_every_n: int = 5,
                  max_grad_norm: int = 1,
-                 embedder_hidden_dims: Optional[List[int]] = [1024, 512, 128],
+                 embedder_hidden_dims: Optional[List[int]] = [128],
                  seq_rnn_cell_type: str = "GRU",
                  seq_rnn_num_layers: int = 2,
                  user_features: list[str] = ["gender", "age", "shopping", "occupation"],
@@ -160,20 +160,19 @@ class Trainer:
         self.optimizer = AdamW(self.model.dense_grad_parameters(), lr=self.learning_rate)
         self.sparse_optimizer = SparseAdam(self.model.sparse_grad_parameters(), lr=self.learning_rate)
 
+        if self.checkpoint_path is not None:
+            self.load_checkpoint(self.checkpoint_path)
+
 
     def load_checkpoint(self, path: str) -> None:
         state = torch.load(path, map_location=self.device)
         self.start_epoch = state["epoch"] + 1
+        self.model.load_state_dict(state["model"])
         self.optimizer.load_state_dict(state["optimizer"])
         self.sparse_optimizer.load_state_dict(state["sparse_optimizer"])
-        self.model.load_state_dict(state["model"])
 
 
     def train(self):
-
-        if self.checkpoint_path is not None:
-            self.load_checkpoint(self.checkpoint_path)
-
         for epoch in range(self.start_epoch, self.train_epochs):
             self.model.train()
             training_losses = []
@@ -282,9 +281,9 @@ if __name__ == "__main__":
         train_eval_every_n=1,
         user_features=["gender", "age", "shopping", "occupation"],
         ad_features=["cate", "brand"],
-        behavior_log_augmented=False,
-        # save_dir_root="out_128_aug_uid_only/"
-        # checkpoint_path="out/checkpoint_0.pt"
+        behavior_log_augmented=True,
+        save_dir_root="out_128_aug/",
+        checkpoint_path="out_128_aug/checkpoint_3.pt"
     )
     print("Model size:", sum(param.numel() for param in trainer.model.parameters()))
     # trainer.eval()

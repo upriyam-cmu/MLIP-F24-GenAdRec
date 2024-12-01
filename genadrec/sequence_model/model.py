@@ -6,7 +6,7 @@ from embedding.ads import AdTower
 from itertools import chain
 from loss.softmax import SampledSoftmaxLoss
 from model.seq import RNN
-from dataset.taobao_behavior_sequences import AdBatch
+from dataset.taobao_behavior_sequences import AdBatch, UserBatch
 from dataset.taobao_behavior_sequences import TaobaoInteractionsSeqBatch
 from typing import List
 
@@ -138,5 +138,6 @@ class RNNSeqModel(nn.Module):
     
     def ad_forward(self, batch: AdBatch):
         return self.ad_embedding(batch).squeeze(0)
-        
-
+    
+    def user_forward(self, batch: UserBatch):
+        return self.user_embedding(batch).squeeze(0)
