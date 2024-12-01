@@ -75,9 +75,13 @@ class PrivacyTrainer:
             path = os.path.join(self.save_dir, self.model_checkpoint)
         state = torch.load(path, map_location=self.device)
         self.start_epoch = state["epoch"] + 1
-        self.training_losses = state["training_losses"]
+        self.training_losses = state["losses"]
         self.optimizer.load_state_dict(state["optimizer"])
         self.model.load_state_dict(state["model"])
+        accuracy = state["accuracy"]
+        print(f"Loaded Model at Epoch {self.start_epoch} from: {path}")
+        print(f"Training loss: {self.training_losses[-1]}")
+        print(f"Model Accuracy: {accuracy}")
 
         
     def train(self):
@@ -157,9 +161,10 @@ if __name__ == "__main__":
         get_user_embeddings_fn=trainer.model.user_forward,
         mlp_input_dim=trainer.embedding_dim,
         mlp_hidden_dims=[64, 32],
-        save_dir = os.path.join(checkpoint_folder, f"eval_{checkpoint_no}", "privacy")
+        save_dir = os.path.join(checkpoint_folder, f"eval_{checkpoint_no}", "privacy"),
+        model_checkpoint="checkpoint_0.pt"
     )
     print(">>> Finished creating user feature extraction head and loading user dataset")
     
-    print (">>> Training user feature extraction model")
-    privacy_model_trainer.train()
+    # print (">>> Training user feature extraction model")
+    # privacy_model_trainer.train()
