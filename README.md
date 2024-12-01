@@ -1,4 +1,6 @@
 # MLIP-F24-GenAdRec
+*Authors: Edoardo Botta, Utkarsh Priyam, Hemit Shah*
+## Intro
 This repository contains a collection of experiments with ad recommendation methods using the [Taobao Ad Display/Click Data]([https://tianchi.aliyun.com/dataset/649?lang=en-us](https://tianchi.aliyun.com/dataset/56#1)) dataset, offered by Alibaba. 
 
 The project was carried out in the context of the [10-718 Machine Learning in Practice](https://github.com/bwilder0/10718_f2024) course at CMU.
