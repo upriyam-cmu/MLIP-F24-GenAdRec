@@ -82,7 +82,7 @@ Our original dataset used to train the models only included users’ ad-click or
 interactions, in addition to user and ad specific features included in the dataset. We retrain the sequence model on the same click targets by further augmenting the ad-click, ad-non-click data with other user behaviors on the Taobao shopping platform, including their browse
 (feed-listing-click), favorite, add-to-cart, and purchase interactions with other items on the platform.
 
-This option is enabled by passing the additional parameter `behaviour_log_augmented=True` to the sequence model `Trainer` class initializer at `genadrec/tt_seq_train.py`.
+This option is enabled by passing the additional parameter `behavior_log_augmented=True` to the sequence model `Trainer` class initializer at `genadrec/tt_seq_train.py`.
 
 
 
